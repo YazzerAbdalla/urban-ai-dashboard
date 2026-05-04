@@ -19,6 +19,11 @@ export default {
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        "class-residential": "hsl(var(--class-residential))",
+        "class-commercial": "hsl(var(--class-commercial))",
+        "class-industrial": "hsl(var(--class-industrial))",
+        "query-cyan": "hsl(var(--query-cyan))",
+        "mock-banner": "hsl(var(--mock-banner))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
