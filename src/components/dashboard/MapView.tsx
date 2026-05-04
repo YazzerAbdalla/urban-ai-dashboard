@@ -77,7 +77,6 @@ export function MapView() {
   // graph topology
   const graph = useMemo(() => {
     const g = getGraphTopology();
-    const nodeMap = new Map(g.nodes.map((n) => [n.id, n]));
     return {
       nodes: {
         type: "FeatureCollection" as const,
@@ -95,7 +94,6 @@ export function MapView() {
           geometry: { type: "LineString" as const, coordinates: e.coords },
         })),
       },
-      nodeMap,
     };
   }, []);
 
