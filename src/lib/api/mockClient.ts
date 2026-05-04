@@ -15,7 +15,10 @@ import type { CellDatum, ClassifyRequest, EvaluateResponse, LoadingStep } from "
 
 export const cairoBbox = (grid as any).bbox as { north: number; south: number; east: number; west: number };
 export const allCells = (grid as any).cells as CellDatum[];
-export const graphTopology = graph as { nodes: { id: string; lng: number; lat: number }[]; edges: { from: string; to: string; coords: [number, number][] }[] };
+export const graphTopology = graph as unknown as {
+  nodes: { id: string; lng: number; lat: number }[];
+  edges: { from: string; to: string; coords: [number, number][] }[];
+};
 
 // PARTIAL-4 startup assertion
 (function validateBbox() {
