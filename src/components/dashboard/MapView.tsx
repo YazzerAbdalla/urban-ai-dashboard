@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import maplibregl, { Map } from "maplibre-gl";
+import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useDash } from "@/store/dashboardStore";
 import { allCells, cairoBbox, getGraphTopology } from "@/lib/api/mockClient";
@@ -34,7 +34,7 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
 
   const cells = useDash((s) => s.cells);
   const layers = useDash((s) => s.layers);
