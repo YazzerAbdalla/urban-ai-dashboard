@@ -5,6 +5,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import MllmBuilder from "./pages/MllmBuilder.tsx";
+import DigitalTwin from "./pages/DigitalTwin.tsx";
+import TrainingLab from "./pages/TrainingLab.tsx";
+import Ablation from "./pages/Ablation.tsx";
 
 const queryClient = new QueryClient();
 
@@ -16,6 +20,10 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+        <Route path="/mllm-builder" element={<MllmBuilder />} />
+        <Route path="/digital-twin" element={<DigitalTwin />} />
+        <Route path="/training-lab" element={<TrainingLab />} />
+        <Route path="/ablation" element={<Ablation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
