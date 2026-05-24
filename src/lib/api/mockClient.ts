@@ -12,6 +12,7 @@
 import grid from "@/mocks/cairo-grid.json";
 import graph from "@/mocks/cairo-graph.json";
 import type { CellDatum, ClassifyRequest, EvaluateResponse, LoadingStep } from "./types";
+import { poisForCell, type PoiPin } from "@/mocks/cairoPois";
 
 export const cairoBbox = (grid as any).bbox as { north: number; south: number; east: number; west: number };
 export const allCells = (grid as any).cells as CellDatum[];
@@ -99,6 +100,38 @@ export class ClassifyJob {
 /** POST /classify — returns a job handle */
 export function classify(req: ClassifyRequest): ClassifyJob {
   return new ClassifyJob(req);
+}
+
+/** Ray-casting point-in-polygon test for a single linear ring [[lng,lat],...]. */
+export function pointInPolygon(pt: [number, number], ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect =
+      yi > pt[1] !== yj > pt[1] &&
+      pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Filter cells whose centroid falls inside a drawn polygon. */
+export function cellsInGeometry(geom: { coordinates: number[][][] } | null): CellDatum[] {
+  if (!geom) return allCells;
+  const ring = geom.coordinates[0];
+  return allCells.filter((c) => pointInPolygon(c.centroid, ring));
+}
+
+/** GET /api/v1/grid/{grid_id}/details — mock implementation */
+export async function getCellDetails(gridId: string): Promise<{
+  cell: CellDatum;
+  pois: PoiPin[];
+} | null> {
+  await new Promise((r) => setTimeout(r, 120));
+  const cell = allCells.find((c) => c.id === gridId);
+  if (!cell) return null;
+  return { cell, pois: poisForCell(cell) };
 }
 
 /** GET /graph-topology — nodes + edges from Cairo OSMnx graph (mock of cairo.graphml) */
