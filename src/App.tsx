@@ -9,6 +9,7 @@ import MllmBuilder from "./pages/MllmBuilder.tsx";
 import DigitalTwin from "./pages/DigitalTwin.tsx";
 import TrainingLab from "./pages/TrainingLab.tsx";
 import Ablation from "./pages/Ablation.tsx";
+import GridDetails from "./pages/GridDetails.tsx";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+        <Route path="/grid/:id/details" element={<GridDetails />} />
         <Route path="/mllm-builder" element={<MllmBuilder />} />
         <Route path="/digital-twin" element={<DigitalTwin />} />
         <Route path="/training-lab" element={<TrainingLab />} />

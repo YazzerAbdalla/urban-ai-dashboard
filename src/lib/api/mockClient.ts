@@ -68,7 +68,10 @@ export class ClassifyJob {
       t += 600;
     });
 
-    const cells = [...allCells];
+    const pool = this.req.area_geometry
+      ? cellsInGeometry(this.req.area_geometry)
+      : [...allCells];
+    const cells = pool;
     const adjusted = cells.map((c) => {
       const boost = this.req.model_type === "gnn" ? Math.min(0.05, c.degree_centrality * 0.1) : 0;
       const conf = Math.min(0.99, c.confidence + boost);
