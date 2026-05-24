@@ -1,4 +1,5 @@
-import { Pin, X, Info } from "lucide-react";
+import { Pin, X, Info, ExternalLink } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
 import { allCells } from "@/lib/api/mockClient";
 import { classHex } from "@/lib/colors";
@@ -30,6 +31,12 @@ export function CellDetailPanel() {
         </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setId(null)}><X /></Button>
       </div>
+
+      <Button asChild size="sm" variant="secondary" className="w-full h-8 text-xs">
+        <Link to={`/grid/${cell.id}/details`}>
+          <ExternalLink className="h-3.5 w-3.5" /> {t("open_full_details")}
+        </Link>
+      </Button>
 
       <div className="space-y-1.5">
         {(["Residential", "Commercial", "Industrial"] as LandUseClass[]).map((k) => {
