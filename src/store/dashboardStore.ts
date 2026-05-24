@@ -3,11 +3,23 @@ import type { CellDatum, FusionMethod, LoadingStep, Modality, ModelType } from "
 
 export type LayerKey = "classification" | "poi" | "roads" | "graph" | "satellite";
 
+export type DrawnGeometry = {
+  type: "Polygon";
+  coordinates: number[][][];
+} | null;
+
 interface DashState {
   bbox: { north: number; south: number; east: number; west: number } | null;
   setBbox: (b: DashState["bbox"]) => void;
   gridSize: 200 | 500 | 1000;
   setGridSize: (n: DashState["gridSize"]) => void;
+
+  /** Custom user-drawn geometry (rectangle/polygon). Filters classification grid when set. */
+  drawnGeometry: DrawnGeometry;
+  setDrawnGeometry: (g: DrawnGeometry) => void;
+  /** Whether the map is currently in draw-area mode. */
+  drawMode: boolean;
+  setDrawMode: (v: boolean) => void;
 
   modalities: Record<Modality, boolean>;
   toggleModality: (m: Modality) => void;
@@ -48,6 +60,11 @@ export const useDash = create<DashState>((set) => ({
   setBbox: (bbox) => set({ bbox }),
   gridSize: 500,
   setGridSize: (gridSize) => set({ gridSize }),
+
+  drawnGeometry: null,
+  setDrawnGeometry: (drawnGeometry) => set({ drawnGeometry }),
+  drawMode: false,
+  setDrawMode: (drawMode) => set({ drawMode }),
 
   modalities: { poi: true, image: true, graph: false, text: false },
   toggleModality: (m) =>

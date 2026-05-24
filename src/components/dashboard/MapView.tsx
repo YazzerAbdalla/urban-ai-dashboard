@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { useNavigate } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
 import { allCells, cairoBbox, getGraphTopology } from "@/lib/api/mockClient";
 import { classHex, opacityFromConfidence } from "@/lib/colors";
@@ -35,12 +36,17 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
 export function MapView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const navigate = useNavigate();
 
   const cells = useDash((s) => s.cells);
   const layers = useDash((s) => s.layers);
   const loaded = useDash((s) => s.loaded);
   const selectedCellId = useDash((s) => s.selectedCellId);
   const setSelectedCellId = useDash((s) => s.setSelectedCellId);
+  const drawnGeometry = useDash((s) => s.drawnGeometry);
+  const setDrawnGeometry = useDash((s) => s.setDrawnGeometry);
+  const drawMode = useDash((s) => s.drawMode);
+  const setDrawMode = useDash((s) => s.setDrawMode);
 
   // FeatureCollection for current classified cells
   const cellsFC = useMemo(() => {
@@ -189,10 +195,39 @@ export function MapView() {
         layout: { visibility: "none" },
       });
 
+      // Drawn custom area
+      map.addSource("drawn", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "drawn-fill",
+        type: "fill",
+        source: "drawn",
+        paint: { "fill-color": "#22d3ee", "fill-opacity": 0.12 },
+      });
+      map.addLayer({
+        id: "drawn-line",
+        type: "line",
+        source: "drawn",
+        paint: { "line-color": "#22d3ee", "line-width": 2 },
+      });
+
       // Click handler
       map.on("click", "cells-fill", (e) => {
+        if (useDash.getState().drawMode) return;
         const f = e.features?.[0];
-        if (f) setSelectedCellId(f.properties?.id as string);
+        if (f) {
+          const id = f.properties?.id as string;
+          setSelectedCellId(id);
+          // double-click navigates to details page
+        }
+      });
+      map.on("dblclick", "cells-fill", (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        e.preventDefault();
+        navigate(`/grid/${f.properties?.id}/details`);
       });
       map.on("mouseenter", "cells-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "cells-fill", () => (map.getCanvas().style.cursor = ""));
@@ -212,6 +247,70 @@ export function MapView() {
     const src = map.getSource("cells") as maplibregl.GeoJSONSource | undefined;
     src?.setData(cellsFC as any);
   }, [cellsFC]);
+
+  // Sync drawn-area source
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
+    src?.setData({
+      type: "FeatureCollection",
+      features: drawnGeometry
+        ? [{ type: "Feature", properties: {}, geometry: drawnGeometry as any }]
+        : [],
+    } as any);
+  }, [drawnGeometry]);
+
+  // Rectangle drawing mode (native MapLibre, no extra deps)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const canvas = map.getCanvas();
+    if (!drawMode) {
+      canvas.style.cursor = "";
+      return;
+    }
+    canvas.style.cursor = "crosshair";
+    map.dragPan.disable();
+    map.boxZoom.disable();
+
+    let start: maplibregl.LngLat | null = null;
+
+    const onDown = (e: maplibregl.MapMouseEvent) => {
+      start = e.lngLat;
+    };
+    const onMove = (e: maplibregl.MapMouseEvent) => {
+      if (!start) return;
+      const ring = rectRing(start, e.lngLat);
+      const src = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
+      src?.setData({
+        type: "FeatureCollection",
+        features: [{
+          type: "Feature", properties: {},
+          geometry: { type: "Polygon", coordinates: [ring] },
+        }],
+      } as any);
+    };
+    const onUp = (e: maplibregl.MapMouseEvent) => {
+      if (!start) return;
+      const ring = rectRing(start, e.lngLat);
+      setDrawnGeometry({ type: "Polygon", coordinates: [ring] });
+      setDrawMode(false);
+      map.dragPan.enable();
+      map.boxZoom.enable();
+      start = null;
+    };
+    map.on("mousedown", onDown);
+    map.on("mousemove", onMove);
+    map.on("mouseup", onUp);
+    return () => {
+      map.off("mousedown", onDown);
+      map.off("mousemove", onMove);
+      map.off("mouseup", onUp);
+      map.dragPan.enable();
+      map.boxZoom.enable();
+    };
+  }, [drawMode, setDrawnGeometry, setDrawMode]);
 
   // Layer visibility
   useEffect(() => {
@@ -236,4 +335,10 @@ export function MapView() {
   }, [selectedCellId, cellsFC]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-label="Map" />;
+}
+
+function rectRing(a: maplibregl.LngLat, b: maplibregl.LngLat): number[][] {
+  const w = Math.min(a.lng, b.lng), e = Math.max(a.lng, b.lng);
+  const s = Math.min(a.lat, b.lat), n = Math.max(a.lat, b.lat);
+  return [[w, s], [e, s], [e, n], [w, n], [w, s]];
 }

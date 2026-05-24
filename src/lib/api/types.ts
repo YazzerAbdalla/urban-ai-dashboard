@@ -33,6 +33,8 @@ export interface ClassifyRequest {
   modalities: Modality[];
   model_type: ModelType;
   fusion_method: FusionMethod;
+  /** Optional user-drawn geometry to clip the classification grid (PRD §6.1) */
+  area_geometry?: { type: "Polygon"; coordinates: number[][][] } | null;
 }
 
 export interface EvaluateResponse {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Square, Play, AlertTriangle, Lock } from "lucide-react";
+import { Search, Square, Play, AlertTriangle, Lock, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,7 +24,7 @@ interface Props { onLoadArea: () => void; onClassify: () => void; onCancel: () =
 export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
-  const { bbox, gridSize, setGridSize, modalities, setModality, modelType, setModelType, fusion, setFusion, loaded, classifying, layers, setLayer } = useDash();
+  const { bbox, gridSize, setGridSize, modalities, setModality, modelType, setModelType, fusion, setFusion, loaded, classifying, layers, setLayer, drawMode, setDrawMode, drawnGeometry, setDrawnGeometry } = useDash();
   const cellEstimate = bbox ? estimateCells(bbox, gridSize) : 0;
   const tooMany = cellEstimate > 500;
   const warn = cellEstimate > 300 && !tooMany;
@@ -41,6 +41,24 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
             </div>
             <Button variant="outline" size="sm" className="h-9" title={t("draw_bbox")} onClick={onLoadArea}><Square className="h-4 w-4" /></Button>
           </div>
+          <div className="flex gap-1.5">
+            <Button
+              variant={drawMode ? "default" : "outline"}
+              size="sm"
+              className="h-8 flex-1 text-xs"
+              onClick={() => setDrawMode(!drawMode)}
+              title={t("draw_area")}
+            >
+              <Pencil className="h-3.5 w-3.5" /> {t("draw_area")}
+            </Button>
+            {drawnGeometry && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDrawnGeometry(null)} title={t("clear_area")}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          {drawMode && <p className="text-[11px] text-accent">{t("drawing_mode")}</p>}
+          {drawnGeometry && !drawMode && <p className="text-[11px] text-primary">● {t("custom_area_active")}</p>}
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">{t("cells_estimate")}</span>
             <span className={cn("mono font-semibold", tooMany && "text-destructive", warn && "text-accent")}>{cellEstimate}</span>

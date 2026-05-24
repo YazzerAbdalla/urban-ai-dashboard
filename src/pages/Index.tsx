@@ -46,7 +46,13 @@ const Index = () => {
     resetCells();
     setClassifying(true);
     setLoadingStep("classifying");
-    const job = classify({ grid_id: "cairo", modalities: mods, model_type: modelType, fusion_method: fusion });
+    const job = classify({
+      grid_id: "cairo",
+      modalities: mods,
+      model_type: modelType,
+      fusion_method: fusion,
+      area_geometry: state.drawnGeometry,
+    });
     jobRef.current = job;
     job.on((e) => {
       if (e.type === "step" && e.step === "classifying") {
