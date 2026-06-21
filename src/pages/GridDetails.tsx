@@ -128,6 +128,11 @@ export default function GridDetails() {
 
       <div className="flex-1 flex overflow-hidden">
         <aside className="w-[320px] shrink-0 border-r border-border bg-card overflow-y-auto p-4 space-y-4">
+          {!FEATURES.gridDetailsApi && (
+            <div className="rounded border border-dashed border-border bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground">
+              Per-cell detail endpoint coming soon — showing data from the latest classification result.
+            </div>
+          )}
           {!data ? (
             <p className="text-sm text-muted-foreground">{t("loading")}</p>
           ) : (
@@ -143,20 +148,21 @@ export default function GridDetails() {
                 <Switch checked={showRoads} onCheckedChange={setShowRoads} />
               </div>
 
-              <div>
-                <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5" /> {t("pois_in_cell")} ({data.pois.length})
-                </h4>
-                <ul className="space-y-1.5">
-                  {data.pois.map((p) => (
-                    <li key={p.id} className="text-xs flex items-center gap-2 rounded border border-border px-2 py-1.5 bg-secondary/40">
-                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: classHex[p.class] }} />
-                      <span className="flex-1 truncate">{p.name}</span>
-                      <span className="mono text-[10px] text-muted-foreground">{p.category}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {data.cell.top5_poi.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5" /> Top POI categories
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {data.cell.top5_poi.map((p, i) => (
+                      <li key={i} className="text-xs flex items-center gap-2 rounded border border-border px-2 py-1.5 bg-secondary/40">
+                        <span className="mono text-[10px] text-muted-foreground">{i + 1}.</span>
+                        <span className="flex-1 truncate mono">{p}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
         </aside>
