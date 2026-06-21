@@ -5,11 +5,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { getCellDetails } from "@/lib/api/mockClient";
+import { useDash } from "@/store/dashboardStore";
 import type { CellDatum } from "@/lib/api/types";
-import type { PoiPin } from "@/mocks/cairoPois";
 import { classHex } from "@/lib/colors";
 import { useI18n } from "@/lib/i18n";
+import { FEATURES } from "@/config/features";
+
+type PoiPin = { id: string; name: string; category: string; lat: number; lng: number; class: CellDatum["class"] };
 
 export default function GridDetails() {
   const { id = "" } = useParams();
@@ -17,19 +19,18 @@ export default function GridDetails() {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const cells = useDash((s) => s.cells);
   const [data, setData] = useState<{ cell: CellDatum; pois: PoiPin[] } | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [showRoads, setShowRoads] = useState(true);
 
   useEffect(() => {
-    let active = true;
-    getCellDetails(id).then((r) => {
-      if (!active) return;
-      if (!r) setNotFound(true);
-      else setData(r);
-    });
-    return () => { active = false; };
-  }, [id]);
+    // Backend per-cell endpoint is not live yet (FEATURES.gridDetailsApi === false).
+    // Read the cell from the cached classification result in the dashboard store.
+    const cell = cells.find((c) => c.id === id);
+    if (!cell) { setNotFound(true); return; }
+    setData({ cell, pois: [] });
+  }, [id, cells]);
 
   const bbox = useMemo(() => {
     if (!data) return null;
@@ -127,6 +128,11 @@ export default function GridDetails() {
 
       <div className="flex-1 flex overflow-hidden">
         <aside className="w-[320px] shrink-0 border-r border-border bg-card overflow-y-auto p-4 space-y-4">
+          {!FEATURES.gridDetailsApi && (
+            <div className="rounded border border-dashed border-border bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground">
+              Per-cell detail endpoint coming soon — showing data from the latest classification result.
+            </div>
+          )}
           {!data ? (
             <p className="text-sm text-muted-foreground">{t("loading")}</p>
           ) : (
@@ -142,20 +148,21 @@ export default function GridDetails() {
                 <Switch checked={showRoads} onCheckedChange={setShowRoads} />
               </div>
 
-              <div>
-                <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5" /> {t("pois_in_cell")} ({data.pois.length})
-                </h4>
-                <ul className="space-y-1.5">
-                  {data.pois.map((p) => (
-                    <li key={p.id} className="text-xs flex items-center gap-2 rounded border border-border px-2 py-1.5 bg-secondary/40">
-                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: classHex[p.class] }} />
-                      <span className="flex-1 truncate">{p.name}</span>
-                      <span className="mono text-[10px] text-muted-foreground">{p.category}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {data.cell.top5_poi.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5" /> Top POI categories
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {data.cell.top5_poi.map((p, i) => (
+                      <li key={i} className="text-xs flex items-center gap-2 rounded border border-border px-2 py-1.5 bg-secondary/40">
+                        <span className="mono text-[10px] text-muted-foreground">{i + 1}.</span>
+                        <span className="flex-1 truncate mono">{p}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
         </aside>

@@ -1,7 +1,6 @@
 import { Pin, X, Info, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
-import { allCells } from "@/lib/api/mockClient";
 import { classHex } from "@/lib/colors";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -15,7 +14,7 @@ export function CellDetailPanel() {
   const togglePin = useDash((s) => s.togglePin);
   const cells = useDash((s) => s.cells);
   const { t } = useI18n();
-  const cell = (cells.find((c) => c.id === id) || allCells.find((c) => c.id === id)) ?? null;
+  const cell = cells.find((c) => c.id === id) ?? null;
   if (!cell) return <div className="p-6 text-sm text-muted-foreground text-center">Click a classified cell to inspect it.</div>;
   const isPinned = pinned.includes(cell.id);
   return (

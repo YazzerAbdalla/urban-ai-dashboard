@@ -1,0 +1,67 @@
+import { api } from "./client";
+import type {
+  AreaStatusResponse,
+  CancelResponse,
+  ClassificationResult,
+  ClassifyRequestBody,
+  EvaluateResponse,
+  ExportFormat,
+  JobId,
+  LoadAreaRequest,
+} from "./types";
+
+export async function loadAreaApi(body: LoadAreaRequest): Promise<JobId> {
+  const { data } = await api.post<JobId>("/api/v1/load-area", body);
+  return data;
+}
+
+export async function areaStatusApi(jobId: string): Promise<AreaStatusResponse> {
+  const { data } = await api.get<AreaStatusResponse>(`/api/v1/area-status/${jobId}`);
+  return data;
+}
+
+export async function classifyApi(body: ClassifyRequestBody): Promise<JobId> {
+  const { data } = await api.post<JobId>("/api/v1/classify", body);
+  return data;
+}
+
+export async function classificationResultApi(jobId: string): Promise<ClassificationResult> {
+  const { data } = await api.get<ClassificationResult>(`/api/v1/classification-result/${jobId}`);
+  return data;
+}
+
+export async function graphTopologyApi(
+  gridId: string,
+  opts: { maxNodes?: number; simplify?: boolean } = {}
+): Promise<GeoJSON.FeatureCollection> {
+  const { data } = await api.get<GeoJSON.FeatureCollection>(
+    `/api/v1/grid/${gridId}/graph-topology`,
+    { params: { max_nodes: opts.maxNodes, simplify: opts.simplify } }
+  );
+  return data;
+}
+
+export async function cancelJobApi(jobId: string): Promise<CancelResponse> {
+  const { data } = await api.delete<CancelResponse>(`/api/v1/jobs/${jobId}`);
+  return data;
+}
+
+export function exportJobUrl(jobId: string, format: ExportFormat): string {
+  const base = (import.meta.env.VITE_API_URL as string) || "";
+  return `${base.replace(/\/+$/, "")}/api/v1/export/${jobId}?format=${format}`;
+}
+
+export function evaluationExportUrl(jobId: string): string {
+  const base = (import.meta.env.VITE_API_URL as string) || "";
+  return `${base.replace(/\/+$/, "")}/api/v1/evaluate/${jobId}/export`;
+}
+
+export async function evaluateApi(jobId: string, file: File): Promise<EvaluateResponse> {
+  const form = new FormData();
+  form.append("job_id", jobId);
+  form.append("ground_truth_file", file);
+  const { data } = await api.post<EvaluateResponse>("/api/v1/evaluate", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}

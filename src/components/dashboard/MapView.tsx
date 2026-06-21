@@ -3,7 +3,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
-import { allCells, cairoBbox, getGraphTopology } from "@/lib/api/mockClient";
+import { cairoBbox } from "@/lib/api/mockClient";
+import { useGraphTopology } from "@/hooks/api/useGraphTopology";
 import { classHex, opacityFromConfidence } from "@/lib/colors";
 
 const OSM_STYLE: maplibregl.StyleSpecification = {
@@ -47,6 +48,8 @@ export function MapView() {
   const setDrawnGeometry = useDash((s) => s.setDrawnGeometry);
   const drawMode = useDash((s) => s.drawMode);
   const setDrawMode = useDash((s) => s.setDrawMode);
+  const gridId = useDash((s) => s.gridId);
+  const graphQ = useGraphTopology(gridId, { enabled: !!gridId && layers.graph });
 
   // FeatureCollection for current classified cells
   const cellsFC = useMemo(() => {
@@ -67,41 +70,20 @@ export function MapView() {
     };
   }, [cells]);
 
-  // empty grid outline FC (always visible after load)
-  const gridFC = useMemo(() => {
-    return {
-      type: "FeatureCollection" as const,
-      features: allCells.map((c) => ({
-        type: "Feature" as const,
-        id: c.id,
-        properties: { id: c.id },
-        geometry: c.geometry,
-      })),
-    };
-  }, []);
-
-  // graph topology
-  const graph = useMemo(() => {
-    const g = getGraphTopology();
-    return {
-      nodes: {
-        type: "FeatureCollection" as const,
-        features: g.nodes.map((n) => ({
-          type: "Feature" as const,
-          properties: {},
-          geometry: { type: "Point" as const, coordinates: [n.lng, n.lat] },
-        })),
-      },
-      edges: {
-        type: "FeatureCollection" as const,
-        features: g.edges.map((e) => ({
-          type: "Feature" as const,
-          properties: {},
-          geometry: { type: "LineString" as const, coordinates: e.coords },
-        })),
-      },
-    };
-  }, []);
+  // Split backend graph-topology FeatureCollection into nodes + edges
+  const graphSplit = useMemo(() => {
+    const empty = { type: "FeatureCollection" as const, features: [] };
+    const fc = graphQ.data;
+    if (!fc) return { nodes: empty, edges: empty };
+    const nodes: any = { type: "FeatureCollection", features: [] };
+    const edges: any = { type: "FeatureCollection", features: [] };
+    for (const f of fc.features as any[]) {
+      const t = f.geometry?.type;
+      if (t === "Point") nodes.features.push(f);
+      else if (t === "LineString" || t === "MultiLineString") edges.features.push(f);
+    }
+    return { nodes, edges };
+  }, [graphQ.data]);
 
   // Init map
   useEffect(() => {
@@ -142,15 +124,6 @@ export function MapView() {
         paint: { "line-color": "#22d3ee", "line-width": 1.5, "line-dasharray": [3, 2] },
       });
 
-      // Empty grid
-      map.addSource("grid", { type: "geojson", data: gridFC });
-      map.addLayer({
-        id: "grid-outline",
-        type: "line",
-        source: "grid",
-        paint: { "line-color": "#64748b", "line-width": 0.4, "line-opacity": 0.7 },
-      });
-
       // Classified cells
       map.addSource("cells", { type: "geojson", data: cellsFC });
       map.addLayer({
@@ -173,7 +146,7 @@ export function MapView() {
       });
 
       // Graph topology
-      map.addSource("graph-edges", { type: "geojson", data: graph.edges });
+      map.addSource("graph-edges", { type: "geojson", data: graphSplit.edges });
       map.addLayer({
         id: "graph-edges",
         type: "line",
@@ -181,7 +154,7 @@ export function MapView() {
         paint: { "line-color": "#22d3ee", "line-width": 0.6, "line-opacity": 0.55 },
         layout: { visibility: "none" },
       });
-      map.addSource("graph-nodes", { type: "geojson", data: graph.nodes });
+      map.addSource("graph-nodes", { type: "geojson", data: graphSplit.nodes });
       map.addLayer({
         id: "graph-nodes",
         type: "circle",
@@ -247,6 +220,14 @@ export function MapView() {
     const src = map.getSource("cells") as maplibregl.GeoJSONSource | undefined;
     src?.setData(cellsFC as any);
   }, [cellsFC]);
+
+  // Update graph data when backend returns it
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    (map.getSource("graph-edges") as maplibregl.GeoJSONSource | undefined)?.setData(graphSplit.edges as any);
+    (map.getSource("graph-nodes") as maplibregl.GeoJSONSource | undefined)?.setData(graphSplit.nodes as any);
+  }, [graphSplit]);
 
   // Sync drawn-area source
   useEffect(() => {
@@ -322,7 +303,6 @@ export function MapView() {
     map.setLayoutProperty("graph-nodes", "visibility", layers.graph ? "visible" : "none");
     map.setLayoutProperty("sat-bg", "visibility", layers.satellite ? "visible" : "none");
     map.setLayoutProperty("osm-bg", "visibility", layers.satellite ? "none" : "visible");
-    map.setLayoutProperty("grid-outline", "visibility", loaded ? "visible" : "none");
   }, [layers, loaded]);
 
   // Selection feature-state

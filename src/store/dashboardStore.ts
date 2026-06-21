@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { CellDatum, FusionMethod, LoadingStep, Modality, ModelType } from "@/lib/api/types";
+import type { JobStatus } from "@/api/types";
 
 export type LayerKey = "classification" | "poi" | "roads" | "graph" | "satellite";
 
@@ -40,6 +41,19 @@ interface DashState {
   cells: CellDatum[];
   appendCells: (c: CellDatum[]) => void;
   resetCells: () => void;
+
+  /** Active backend job ids (load + classify) */
+  loadJobId: string | null;
+  setLoadJobId: (id: string | null) => void;
+  classifyJobId: string | null;
+  setClassifyJobId: (id: string | null) => void;
+  /** Set after /load-area completes — used as grid_id for downstream calls */
+  gridId: string | null;
+  setGridId: (id: string | null) => void;
+  jobStatus: JobStatus | null;
+  setJobStatus: (s: JobStatus | null) => void;
+  /** Replace all cells at once (used when classification-result arrives) */
+  setCells: (c: CellDatum[]) => void;
 
   selectedCellId: string | null;
   setSelectedCellId: (id: string | null) => void;
@@ -92,6 +106,16 @@ export const useDash = create<DashState>((set) => ({
   cells: [],
   appendCells: (c) => set((s) => ({ cells: [...s.cells, ...c] })),
   resetCells: () => set({ cells: [], classifyProgress: 0 }),
+  setCells: (cells) => set({ cells }),
+
+  loadJobId: null,
+  setLoadJobId: (loadJobId) => set({ loadJobId }),
+  classifyJobId: null,
+  setClassifyJobId: (classifyJobId) => set({ classifyJobId }),
+  gridId: null,
+  setGridId: (gridId) => set({ gridId }),
+  jobStatus: null,
+  setJobStatus: (jobStatus) => set({ jobStatus }),
 
   selectedCellId: null,
   setSelectedCellId: (selectedCellId) => set({ selectedCellId }),
