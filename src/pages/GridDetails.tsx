@@ -5,11 +5,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { getCellDetails } from "@/lib/api/mockClient";
+import { useDash } from "@/store/dashboardStore";
 import type { CellDatum } from "@/lib/api/types";
-import type { PoiPin } from "@/mocks/cairoPois";
 import { classHex } from "@/lib/colors";
 import { useI18n } from "@/lib/i18n";
+import { FEATURES } from "@/config/features";
+
+type PoiPin = { id: string; name: string; category: string; lat: number; lng: number; class: CellDatum["class"] };
 
 export default function GridDetails() {
   const { id = "" } = useParams();
@@ -17,19 +19,18 @@ export default function GridDetails() {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const cells = useDash((s) => s.cells);
   const [data, setData] = useState<{ cell: CellDatum; pois: PoiPin[] } | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [showRoads, setShowRoads] = useState(true);
 
   useEffect(() => {
-    let active = true;
-    getCellDetails(id).then((r) => {
-      if (!active) return;
-      if (!r) setNotFound(true);
-      else setData(r);
-    });
-    return () => { active = false; };
-  }, [id]);
+    // Backend per-cell endpoint is not live yet (FEATURES.gridDetailsApi === false).
+    // Read the cell from the cached classification result in the dashboard store.
+    const cell = cells.find((c) => c.id === id);
+    if (!cell) { setNotFound(true); return; }
+    setData({ cell, pois: [] });
+  }, [id, cells]);
 
   const bbox = useMemo(() => {
     if (!data) return null;
