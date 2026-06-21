@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { MapView } from "@/components/dashboard/MapView";
@@ -6,74 +6,118 @@ import { RightPanel } from "@/components/dashboard/RightPanel";
 import { StatusBar } from "@/components/dashboard/StatusBar";
 import { LoadingOverlay } from "@/components/dashboard/LoadingOverlay";
 import { useDash } from "@/store/dashboardStore";
-import { classify, ClassifyJob } from "@/lib/api/mockClient";
+import { cairoBbox } from "@/lib/api/mockClient";
+import { useLoadArea } from "@/hooks/api/useLoadArea";
+import { useClassify } from "@/hooks/api/useClassify";
+import { useCancelJob } from "@/hooks/api/useCancelJob";
+import { useJobProgress } from "@/hooks/api/useJobProgress";
+import { useClassificationResult } from "@/hooks/api/useClassificationResult";
+import { isSuccess, isTerminal, type LoadingStep } from "@/api/types";
+import { featureToCell } from "@/lib/adapters";
 import { useUrlLayers } from "@/hooks/useUrlLayers";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import type { Modality } from "@/lib/api/types";
 
 const Index = () => {
   useUrlLayers();
-  const jobRef = useRef<ClassifyJob | null>(null);
 
   const {
     setLoaded, setLoadingStep, setClassifying, setClassifyProgress,
-    appendCells, resetCells, modalities, modelType, fusion, setActiveTab,
+    resetCells, setCells, modelType, fusion, setActiveTab,
+    bbox, gridSize, loadJobId, setLoadJobId, classifyJobId, setClassifyJobId,
+    gridId, setGridId,
   } = useDash();
 
+  const loadAreaM = useLoadArea();
+  const classifyM = useClassify();
+  const cancelM = useCancelJob();
+  const loadProgress = useJobProgress(loadJobId);
+  const classifyProgress = useJobProgress(classifyJobId);
+  const resultQ = useClassificationResult(classifyJobId, isSuccess(classifyProgress.status));
+
   const handleLoadArea = useCallback(() => {
-    if (useDash.getState().loaded) return;
+    if (useDash.getState().loaded || loadAreaM.isPending) return;
+    const b = bbox ?? cairoBbox;
     setLoadingStep("downloading_poi");
-    let i = 0;
-    const steps = ["downloading_poi", "mapping_poi_to_nodes", "building_graph"] as const;
-    const tick = () => {
-      i++;
-      if (i < steps.length) {
-        setLoadingStep(steps[i]);
-        setTimeout(tick, 700);
-      } else {
-        setLoadingStep(null);
-        setLoaded(true);
+    loadAreaM.mutate(
+      { bbox: [b.west, b.south, b.east, b.north], place_name: "Cairo, Egypt" },
+      {
+        onSuccess: ({ job_id }) => setLoadJobId(job_id),
+        onError: () => setLoadingStep(null),
       }
-    };
-    setTimeout(tick, 700);
-  }, [setLoaded, setLoadingStep]);
+    );
+  }, [bbox, loadAreaM, setLoadJobId, setLoadingStep]);
 
   const handleClassify = useCallback(() => {
     const state = useDash.getState();
-    if (!state.loaded || state.classifying) return;
+    if (!state.loaded || state.classifying || !state.gridId) return;
     const mods = (Object.keys(state.modalities) as Modality[]).filter((k) => state.modalities[k]);
     if (mods.length === 0) return;
     resetCells();
     setClassifying(true);
     setLoadingStep("classifying");
-    const job = classify({
-      grid_id: "cairo",
-      modalities: mods,
-      model_type: modelType,
-      fusion_method: fusion,
-      area_geometry: state.drawnGeometry,
-    });
-    jobRef.current = job;
-    job.on((e) => {
-      if (e.type === "step" && e.step === "classifying") {
-        setLoadingStep(null);
+    classifyM.mutate(
+      {
+        grid_id: state.gridId,
+        cell_size: state.gridSize,
+        modalities: mods,
+        model_type: modelType,
+        fusion_method: fusion,
+        area_geometry: state.drawnGeometry,
+      },
+      {
+        onSuccess: ({ job_id }) => setClassifyJobId(job_id),
+        onError: () => { setClassifying(false); setLoadingStep(null); },
       }
-      if (e.type === "batch" && e.cells) {
-        appendCells(e.cells);
-        if (typeof e.progress === "number") setClassifyProgress(e.progress);
-      }
-      if (e.type === "done" || e.type === "cancelled") {
-        setClassifying(false);
-        setLoadingStep(null);
-        jobRef.current = null;
-      }
-    });
-    job.start();
-  }, [appendCells, fusion, modelType, resetCells, setClassifying, setClassifyProgress, setLoadingStep]);
+    );
+  }, [classifyM, fusion, modelType, resetCells, setClassifying, setClassifyJobId, setLoadingStep]);
 
   const handleCancel = useCallback(() => {
-    jobRef.current?.cancel();
-  }, []);
+    const jid = classifyJobId || loadJobId;
+    if (!jid) return;
+    cancelM.mutate(jid, {
+      onSuccess: () => {
+        setClassifying(false);
+        setLoadingStep(null);
+        if (classifyJobId) setClassifyJobId(null);
+        else setLoadJobId(null);
+      },
+    });
+  }, [cancelM, classifyJobId, loadJobId, setClassifying, setClassifyJobId, setLoadJobId, setLoadingStep]);
+
+  // React to load-area job progress
+  useEffect(() => {
+    if (!loadJobId) return;
+    if (loadProgress.step) setLoadingStep(loadProgress.step as LoadingStep);
+    if (isSuccess(loadProgress.status)) {
+      setLoaded(true);
+      setGridId(loadJobId);
+      setLoadingStep(null);
+    } else if (isTerminal(loadProgress.status)) {
+      setLoadingStep(null);
+    }
+  }, [loadJobId, loadProgress.status, loadProgress.step, setGridId, setLoaded, setLoadingStep]);
+
+  // React to classify job progress
+  useEffect(() => {
+    if (!classifyJobId) return;
+    if (typeof classifyProgress.progress === "number") setClassifyProgress(classifyProgress.progress);
+    if (classifyProgress.step) setLoadingStep(classifyProgress.step as LoadingStep);
+    if (isSuccess(classifyProgress.status)) {
+      setLoadingStep(null);
+    } else if (isTerminal(classifyProgress.status)) {
+      setClassifying(false);
+      setLoadingStep(null);
+    }
+  }, [classifyJobId, classifyProgress.status, classifyProgress.step, classifyProgress.progress, setClassifying, setClassifyProgress, setLoadingStep]);
+
+  // Populate cells when classification result arrives
+  useEffect(() => {
+    if (!resultQ.data) return;
+    const mapped = resultQ.data.features.map(featureToCell);
+    setCells(mapped);
+    setClassifying(false);
+  }, [resultQ.data, setCells, setClassifying]);
 
   useKeyboardShortcuts({
     onDraw: handleLoadArea,
