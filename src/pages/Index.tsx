@@ -24,8 +24,8 @@ const Index = () => {
   const {
     setLoaded, setLoadingStep, setClassifying, setClassifyProgress,
     resetCells, setCells, modelType, fusion, setActiveTab,
-    bbox, gridSize, loadJobId, setLoadJobId, classifyJobId, setClassifyJobId,
-    gridId, setGridId,
+    bbox, loadJobId, setLoadJobId, classifyJobId, setClassifyJobId,
+    setGridId,
   } = useDash();
 
   const loadAreaM = useLoadArea();
