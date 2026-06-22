@@ -25,6 +25,8 @@ export interface AreaStatusResponse {
   step?: LoadingStep | string;
   progress?: number;
   message?: string;
+  /** Generated grid ID when status is completed/done */
+  grid_id?: string;
 }
 
 export interface ClassifyRequestBody {
@@ -36,6 +38,11 @@ export interface ClassifyRequestBody {
   area_geometry?: { type: "Polygon"; coordinates: number[][][] } | null;
 }
 
+/**
+ * Backend v1 classification result — fields arrive as GeoJSON Feature properties.
+ * Some backends return the same fields *flat* on the feature object itself;
+ * see {@link BackendFeatureFlat} for that shape.
+ */
 export interface ClassificationFeatureProps {
   cell_id: string;
   class: LandUseClass;
@@ -49,6 +56,31 @@ export interface ClassificationFeatureProps {
   clustering_coeff?: number;
   total_road_length_m?: number;
   satellite_thumb?: string;
+}
+
+/**
+ * Real backend response shape — all classification fields sit *flat* on the
+ * GeoJSON Feature alongside `geometry` (no `properties` wrapper).
+ * Confidences use lowercase class names; class identity comes from
+ * `dominant_class`; POI list is `poi_top_categories`; thumbnail is
+ * `satellite_thumbnail_url`.
+ */
+export interface BackendFeatureFlat {
+  cell_id: number;
+  dominant_class: string;
+  confidence: number;
+  confidences: Record<string, number>;
+  road_density?: number;
+  node_count?: number;
+  degree_centrality?: number;
+  clustering_coeff?: number;
+  total_road_length_m?: number;
+  poi_top_categories?: string[];
+  text_embedding_norm?: number;
+  graph_embedding_norm?: number;
+  satellite_thumbnail_url?: string;
+  geometry: GeoJSON.Polygon;
+  centroid?: [number, number];
 }
 
 export type ClassificationFeature = GeoJSON.Feature<GeoJSON.Polygon, ClassificationFeatureProps>;

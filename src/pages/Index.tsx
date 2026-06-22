@@ -6,7 +6,7 @@ import { RightPanel } from "@/components/dashboard/RightPanel";
 import { StatusBar } from "@/components/dashboard/StatusBar";
 import { LoadingOverlay } from "@/components/dashboard/LoadingOverlay";
 import { useDash } from "@/store/dashboardStore";
-import { cairoBbox } from "@/lib/api/mockClient";
+import { cairoBbox, estimateCells } from "@/lib/api/mockClient";
 import { useLoadArea } from "@/hooks/api/useLoadArea";
 import { useClassify } from "@/hooks/api/useClassify";
 import { useCancelJob } from "@/hooks/api/useCancelJob";
@@ -17,6 +17,8 @@ import { featureToCell } from "@/lib/adapters";
 import { useUrlLayers } from "@/hooks/useUrlLayers";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import type { Modality } from "@/lib/api/types";
+import { toast } from "@/hooks/use-toast";
+import { getBboxFromGeometry, createSmallDefaultArea } from "@/lib/geoUtils";
 
 const Index = () => {
   useUrlLayers();
@@ -25,7 +27,8 @@ const Index = () => {
     setLoaded, setLoadingStep, setClassifying, setClassifyProgress,
     resetCells, setCells, modelType, fusion, setActiveTab,
     bbox, loadJobId, setLoadJobId, classifyJobId, setClassifyJobId,
-    setGridId,
+    setGridId, gridSize, setGridSize, drawnGeometry, setDrawnGeometry,
+    searchLocation,
   } = useDash();
 
   const loadAreaM = useLoadArea();
@@ -35,18 +38,92 @@ const Index = () => {
   const classifyProgress = useJobProgress(classifyJobId);
   const resultQ = useClassificationResult(classifyJobId, isSuccess(classifyProgress.status));
 
+  /**
+   * Triggers loading of urban data for the selected area of interest (AOI).
+   * Implements validation and automatic grid size fallback.
+   */
   const handleLoadArea = useCallback(() => {
     if (useDash.getState().loaded || loadAreaM.isPending) return;
-    const b = bbox ?? cairoBbox;
+
+    let areaToAnalyze = null;
+    let isDefaultArea = false;
+
+    // Area source selection logic:
+    // 1. drawnGeometry takes absolute priority
+    // 2. Fall back to creating a small default area centered on the searchLocation
+    if (drawnGeometry) {
+      areaToAnalyze = drawnGeometry;
+    } else if (searchLocation) {
+      areaToAnalyze = createSmallDefaultArea(searchLocation.lng, searchLocation.lat);
+      isDefaultArea = true;
+    }
+
+    // Show error if no area or location is selected/drawn
+    if (!areaToAnalyze) {
+      toast({
+        title: "Area Selection Required",
+        description: "Please draw an area on the map or select a search location.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const b = getBboxFromGeometry(areaToAnalyze);
+    if (!b) return;
+
+    let currentGridSize = gridSize;
+    let cellEstimate = estimateCells(b, currentGridSize);
+
+    // Validate estimated cells before sending request
+    if (cellEstimate > 500) {
+      // Try to find a larger grid size that is under the 500-cell limit
+      const sizes: (200 | 500 | 1000)[] = [200, 500, 1000];
+      const nextSize = sizes.find((s) => s > currentGridSize && estimateCells(b, s) <= 500);
+      if (nextSize) {
+        currentGridSize = nextSize;
+        setGridSize(nextSize);
+        toast({
+          title: "Grid Size Adjusted",
+          description: `Grid size automatically increased to ${nextSize}m to stay within backend cell limits.`,
+        });
+        cellEstimate = estimateCells(b, nextSize);
+      } else {
+        toast({
+          title: "Area Too Large",
+          description: `Estimated ${cellEstimate} cells exceed the 500-cell backend limit. Please zoom in or draw a smaller area.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setLoadingStep("downloading_poi");
     loadAreaM.mutate(
-      { bbox: [b.west, b.south, b.east, b.north], place_name: "Cairo, Egypt" },
       {
-        onSuccess: ({ job_id }) => setLoadJobId(job_id),
+        bbox: [b.west, b.south, b.east, b.north],
+        place_name: searchLocation?.label || "Custom Drawn Area",
+      },
+      {
+        onSuccess: ({ job_id }) => {
+          setLoadJobId(job_id);
+          // Save the default area as drawn geometry so it renders on map after load completes
+          if (isDefaultArea) {
+            setDrawnGeometry(areaToAnalyze);
+          }
+        },
         onError: () => setLoadingStep(null),
       }
     );
-  }, [bbox, loadAreaM, setLoadJobId, setLoadingStep]);
+  }, [
+    drawnGeometry,
+    searchLocation,
+    gridSize,
+    setGridSize,
+    setDrawnGeometry,
+    loadAreaM,
+    setLoadJobId,
+    setLoadingStep,
+  ]);
 
   const handleClassify = useCallback(() => {
     const state = useDash.getState();
@@ -91,12 +168,13 @@ const Index = () => {
     if (loadProgress.step) setLoadingStep(loadProgress.step as LoadingStep);
     if (isSuccess(loadProgress.status)) {
       setLoaded(true);
-      setGridId(loadJobId);
+      // Retrieve grid_id from job status progress response, fallback to loadJobId if not present
+      setGridId(loadProgress.gridId || loadJobId);
       setLoadingStep(null);
     } else if (isTerminal(loadProgress.status)) {
       setLoadingStep(null);
     }
-  }, [loadJobId, loadProgress.status, loadProgress.step, setGridId, setLoaded, setLoadingStep]);
+  }, [loadJobId, loadProgress.status, loadProgress.step, loadProgress.gridId, setGridId, setLoaded, setLoadingStep]);
 
   // React to classify job progress
   useEffect(() => {
@@ -114,7 +192,17 @@ const Index = () => {
   // Populate cells when classification result arrives
   useEffect(() => {
     if (!resultQ.data) return;
+    if (import.meta.env.DEV) {
+      console.log("[Index] classification result received — feature count:", resultQ.data.features?.length);
+      resultQ.data.features?.forEach((f: Record<string, unknown>) => {
+        console.log("  feature dominant_class:", f.dominant_class, "cell_id:", f.cell_id, "properties:", f.properties);
+      });
+    }
     const mapped = resultQ.data.features.map(featureToCell);
+    if (import.meta.env.DEV) {
+      console.log("[Index] mapped cells:", mapped.length);
+      mapped.forEach((c) => console.log("  cell id:", c.id, "class:", c.class, "confidence:", c.confidence));
+    }
     setCells(mapped);
     setClassifying(false);
   }, [resultQ.data, setCells, setClassifying]);

@@ -6,6 +6,7 @@ import { useDash } from "@/store/dashboardStore";
 import { cairoBbox } from "@/lib/api/mockClient";
 import { useGraphTopology } from "@/hooks/api/useGraphTopology";
 import { classHex, opacityFromConfidence } from "@/lib/colors";
+import { createSmallDefaultArea } from "@/lib/geoUtils";
 
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -48,26 +49,27 @@ export function MapView() {
   const setDrawnGeometry = useDash((s) => s.setDrawnGeometry);
   const drawMode = useDash((s) => s.drawMode);
   const setDrawMode = useDash((s) => s.setDrawMode);
+  const searchLocation = useDash((s) => s.searchLocation);
   const gridId = useDash((s) => s.gridId);
   const graphQ = useGraphTopology(gridId, { enabled: !!gridId && layers.graph });
 
   // FeatureCollection for current classified cells
   const cellsFC = useMemo(() => {
-    return {
-      type: "FeatureCollection" as const,
-      features: cells.map((c) => ({
+    const features = cells.map((c) => {
+      const fill = classHex[c.class as keyof typeof classHex] || classHex.Residential;
+      const opacity = opacityFromConfidence(c.confidence);
+      return {
         type: "Feature" as const,
         id: c.id,
-        properties: {
-          id: c.id,
-          class: c.class,
-          confidence: c.confidence,
-          fill: classHex[c.class],
-          opacity: opacityFromConfidence(c.confidence),
-        },
+        properties: { id: c.id, class: c.class, confidence: c.confidence, fill, opacity },
         geometry: c.geometry,
-      })),
-    };
+      };
+    });
+    if (import.meta.env.DEV) {
+      console.log("[MapView] cellsFC features:", features.length);
+      features.forEach((f) => console.log("  id:", f.id, "class:", f.properties.class, "fill:", f.properties.fill));
+    }
+    return { type: "FeatureCollection" as const, features };
   }, [cells]);
 
   // Split backend graph-topology FeatureCollection into nodes + edges
@@ -218,7 +220,16 @@ export function MapView() {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
     const src = map.getSource("cells") as maplibregl.GeoJSONSource | undefined;
-    src?.setData(cellsFC as any);
+    if (src) {
+      src.setData(cellsFC as any);
+      if (import.meta.env.DEV) {
+        console.log("[MapView] setData on 'cells' source — features:", cellsFC.features.length);
+        // Log first feature's properties to verify fill value
+        if (cellsFC.features.length > 0) {
+          console.log("  first feature props:", cellsFC.features[0].properties);
+        }
+      }
+    }
   }, [cellsFC]);
 
   // Update graph data when backend returns it
@@ -229,6 +240,13 @@ export function MapView() {
     (map.getSource("graph-nodes") as maplibregl.GeoJSONSource | undefined)?.setData(graphSplit.nodes as any);
   }, [graphSplit]);
 
+  // Compute active preview geometry (priority: drawnGeometry, fallback: searchLocation default area)
+  const displayGeometry = useMemo(() => {
+    if (drawnGeometry) return drawnGeometry;
+    if (searchLocation) return createSmallDefaultArea(searchLocation.lng, searchLocation.lat);
+    return null;
+  }, [drawnGeometry, searchLocation]);
+
   // Sync drawn-area source
   useEffect(() => {
     const map = mapRef.current;
@@ -236,11 +254,22 @@ export function MapView() {
     const src = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
     src?.setData({
       type: "FeatureCollection",
-      features: drawnGeometry
-        ? [{ type: "Feature", properties: {}, geometry: drawnGeometry as any }]
+      features: displayGeometry
+        ? [{ type: "Feature", properties: {}, geometry: displayGeometry as any }]
         : [],
     } as any);
-  }, [drawnGeometry]);
+  }, [displayGeometry]);
+
+  // Center and zoom map when searchLocation changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !searchLocation) return;
+    map.flyTo({
+      center: [searchLocation.lng, searchLocation.lat],
+      zoom: 13,
+      essential: true
+    });
+  }, [searchLocation]);
 
   // Rectangle drawing mode (native MapLibre, no extra deps)
   useEffect(() => {

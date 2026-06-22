@@ -50,6 +50,8 @@ export function useJobProgress(jobId: string | null) {
   const status = (poll.data?.status ?? (wsMsg as AreaStatusResponse | null)?.status) as JobStatus | undefined;
   const step = wsMsg?.step ?? poll.data?.step;
   const progress = wsMsg?.progress ?? poll.data?.progress ?? 0;
+  // Get grid_id from WebSocket message or fallback polling response
+  const gridId = wsMsg?.grid_id ?? poll.data?.grid_id;
 
-  return { status, step, progress, raw: poll.data, isLoading: poll.isLoading };
+  return { status, step, progress, gridId, raw: poll.data, isLoading: poll.isLoading };
 }

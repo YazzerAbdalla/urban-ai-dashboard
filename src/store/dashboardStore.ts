@@ -65,6 +65,11 @@ interface DashState {
 
   activeTab: "detail" | "evaluation";
   setActiveTab: (t: DashState["activeTab"]) => void;
+
+  /** Selected search location for centering/zooming and default area generation. */
+  searchLocation: { lat: number; lng: number; label: string } | null;
+  /** Sets the selected search location. */
+  setSearchLocation: (loc: { lat: number; lng: number; label: string } | null) => void;
 }
 
 const STEP2_BBOX = { north: 30.10, south: 29.90, east: 31.30, west: 31.10 };
@@ -138,4 +143,7 @@ export const useDash = create<DashState>((set) => ({
 
   activeTab: "detail",
   setActiveTab: (activeTab) => set({ activeTab }),
+
+  searchLocation: null,
+  setSearchLocation: (searchLocation) => set({ searchLocation }),
 }));
