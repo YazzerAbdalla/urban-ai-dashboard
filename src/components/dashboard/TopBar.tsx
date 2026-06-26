@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Globe, Map as MapIcon, Brain, Cpu, FlaskConical, GitCompare } from "lucide-react";
+import { Globe, Map as MapIcon, Brain, Cpu, FlaskConical, GitCompare, Thermometer } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ export function TopBar() {
     { to: "/digital-twin", label: t("nav_twin"), icon: Cpu },
     { to: "/training-lab", label: t("nav_training"), icon: FlaskConical },
     { to: "/ablation", label: t("nav_ablation"), icon: GitCompare },
+    { to: "/internal/poi-heatmap", label: t("nav_poi_heatmap"), icon: Thermometer },
   ];
   return (
     <header className="h-12 shrink-0 border-b border-border bg-card flex items-center px-4 gap-6">

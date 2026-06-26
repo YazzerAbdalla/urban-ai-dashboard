@@ -6,8 +6,11 @@ import type {
   ClassifyRequestBody,
   EvaluateResponse,
   ExportFormat,
+  InternalPoiHeatmapResponse,
   JobId,
   LoadAreaRequest,
+  PoiHeatmapResponse,
+  PoiItem,
 } from "./types";
 
 export async function loadAreaApi(body: LoadAreaRequest): Promise<JobId> {
@@ -54,6 +57,23 @@ export function exportJobUrl(jobId: string, format: ExportFormat): string {
 export function evaluationExportUrl(jobId: string): string {
   const base = (import.meta.env.VITE_API_URL as string) || "";
   return `${base.replace(/\/+$/, "")}/api/v1/evaluate/${jobId}/export`;
+}
+
+export async function poiHeatmapApi(gridId: string): Promise<PoiHeatmapResponse> {
+  const { data } = await api.get<PoiHeatmapResponse>(
+    `/api/v1/grid/${gridId}/poi-heatmap`
+  );
+  return data;
+}
+
+export async function internalPoiHeatmapApi(): Promise<InternalPoiHeatmapResponse> {
+  const { data } = await api.get<InternalPoiHeatmapResponse>("/api/v1/internal/poi-heatmap");
+  return data;
+}
+
+export async function gridPoisApi(gridId: string): Promise<PoiItem[]> {
+  const { data } = await api.get<PoiItem[]>(`/api/v1/grid/${gridId}/pois`);
+  return data;
 }
 
 export async function evaluateApi(jobId: string, file: File): Promise<EvaluateResponse> {

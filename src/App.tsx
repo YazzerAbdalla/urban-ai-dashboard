@@ -10,6 +10,8 @@ import DigitalTwin from "./pages/DigitalTwin.tsx";
 import TrainingLab from "./pages/TrainingLab.tsx";
 import Ablation from "./pages/Ablation.tsx";
 import GridDetails from "./pages/GridDetails.tsx";
+import CellDetailsPage from "./pages/CellDetailsPage.tsx";
+import InternalPoiHeatmap from "./pages/InternalPoiHeatmap.tsx";
 
 const queryClient = new QueryClient();
 
@@ -21,12 +23,14 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-        <Route path="/grid/:id/details" element={<GridDetails />} />
-        <Route path="/mllm-builder" element={<MllmBuilder />} />
-        <Route path="/digital-twin" element={<DigitalTwin />} />
-        <Route path="/training-lab" element={<TrainingLab />} />
-        <Route path="/ablation" element={<Ablation />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="/classification/:jobId/cell/:cellId" element={<CellDetailsPage />} />
+          <Route path="/classification/:jobId" element={<Index />} />
+          <Route path="/grid/:id/details" element={<GridDetails />} />
+          <Route path="/mllm-builder" element={<MllmBuilder />} />
+          <Route path="/digital-twin" element={<DigitalTwin />} />
+          <Route path="/training-lab" element={<TrainingLab />} />
+          <Route path="/ablation" element={<Ablation />} />
+          <Route path="/internal/poi-heatmap" element={<InternalPoiHeatmap />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

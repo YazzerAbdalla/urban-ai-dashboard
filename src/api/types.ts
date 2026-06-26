@@ -96,6 +96,39 @@ export interface EvaluateResponse {
   class_labels?: LandUseClass[];
 }
 
+export interface PoiItem {
+  name: string;
+  category: string;
+  lat: number;
+  lng: number;
+}
+
+export type PoiHeatmapResponse =
+  GeoJSON.FeatureCollection<GeoJSON.Point> & {
+    metadata?: {
+      total_pois: number;
+    };
+  };
+
+export interface InternalPoiHeatmapPoiProperties {
+  name: string;
+  category: string;
+  place_type: string;
+  osm_id: string;
+  label: string;
+  weight?: number;
+}
+
+export interface InternalPoiHeatmapResponse {
+  type: "FeatureCollection";
+  features: GeoJSON.Feature<GeoJSON.Point, InternalPoiHeatmapPoiProperties>[];
+  metadata: {
+    total_pois: number;
+    num_categories: number;
+    dataset_source: string;
+  };
+}
+
 export interface CancelResponse {
   status: "cancelled";
   job_id: string;
