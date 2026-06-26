@@ -9,6 +9,8 @@ export const FEATURES = {
   digitalTwin: false,
   /** GET  /api/v1/grid/{grid_id}/details — per-cell drill-down */
   gridDetailsApi: false,
+  /** POST /api/v1/internal/poi-quality-review — AI data quality review */
+  poiQualityReview: false,
 } as const;
 
 export type FeatureFlag = keyof typeof FEATURES;

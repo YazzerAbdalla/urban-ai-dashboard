@@ -12,6 +12,7 @@ import Ablation from "./pages/Ablation.tsx";
 import GridDetails from "./pages/GridDetails.tsx";
 import CellDetailsPage from "./pages/CellDetailsPage.tsx";
 import InternalPoiHeatmap from "./pages/InternalPoiHeatmap.tsx";
+import PoiDataManager from "./pages/PoiDataManager.tsx";
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ const App = () => (
           <Route path="/training-lab" element={<TrainingLab />} />
           <Route path="/ablation" element={<Ablation />} />
           <Route path="/internal/poi-heatmap" element={<InternalPoiHeatmap />} />
+          <Route path="/poi-manager" element={<PoiDataManager />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

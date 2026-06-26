@@ -15,6 +15,12 @@ import type {
   PoiHeatmapResponse,
   PoiItem,
 } from "./types";
+import type {
+  PoiPreviewResponse,
+  PoiImportResponse,
+  PoiQualityReviewRequest,
+  PoiQualityReviewResponse,
+} from "./poiDataManagerTypes";
 
 export async function loadAreaApi(body: LoadAreaRequest): Promise<JobId> {
   const { data } = await api.post<JobId>("/api/v1/load-area", body);
@@ -92,6 +98,35 @@ export async function gridPoisApi(gridId: string): Promise<PoiItem[]> {
 export async function poiChatApi(body: PoiChatRequest): Promise<PoiChatResponse> {
   const { data } = await api.post<PoiChatResponse>("/api/v1/internal/poi-chat", body);
   return data;
+}
+
+export async function poiPreviewUploadApi(file: File): Promise<PoiPreviewResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<PoiPreviewResponse>("/api/v1/internal/poi-preview", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function poiImportConfirmApi(sessionId: string): Promise<PoiImportResponse> {
+  const { data } = await api.post<PoiImportResponse>(`/api/v1/internal/poi-import/${sessionId}`);
+  return data;
+}
+
+export async function poiQualityReviewApi(body: PoiQualityReviewRequest): Promise<PoiQualityReviewResponse> {
+  const { data } = await api.post<PoiQualityReviewResponse>("/api/v1/internal/poi-quality-review", body);
+  return data;
+}
+
+export function poiTemplateDownloadUrl(): string {
+  const base = (import.meta.env.VITE_API_URL as string) || "";
+  return `${base.replace(/\/+$/, "")}/api/v1/internal/poi-template`;
+}
+
+export function poiValidationReportUrl(previewId: string): string {
+  const base = (import.meta.env.VITE_API_URL as string) || "";
+  return `${base.replace(/\/+$/, "")}/api/v1/internal/poi-validation-report/${previewId}`;
 }
 
 export async function evaluateApi(jobId: string, file: File): Promise<EvaluateResponse> {

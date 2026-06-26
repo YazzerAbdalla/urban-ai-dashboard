@@ -202,10 +202,11 @@ export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapView
           source: "poi-heatmap-source",
           paint: {
             "circle-radius": [
-              "case",
-              [">=", ["zoom"], 12],
-              9,
-              0,
+              "interpolate", ["linear"], ["zoom"],
+              0, 0,
+              12, 0,
+              12.01, 9,
+              22, 9,
             ],
             "circle-color": "#e63946",
             "circle-stroke-color": "#ffffff",
