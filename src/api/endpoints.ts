@@ -10,6 +10,8 @@ import type {
   JobId,
   LoadAreaRequest,
   PoiAnalysisResponse,
+  PoiChatRequest,
+  PoiChatResponse,
   PoiHeatmapResponse,
   PoiItem,
 } from "./types";
@@ -84,6 +86,11 @@ export async function internalPoiHeatmapApi(): Promise<InternalPoiHeatmapRespons
 
 export async function gridPoisApi(gridId: string): Promise<PoiItem[]> {
   const { data } = await api.get<PoiItem[]>(`/api/v1/grid/${gridId}/pois`);
+  return data;
+}
+
+export async function poiChatApi(body: PoiChatRequest): Promise<PoiChatResponse> {
+  const { data } = await api.post<PoiChatResponse>("/api/v1/internal/poi-chat", body);
   return data;
 }
 

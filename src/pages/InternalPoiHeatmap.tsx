@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useReducer } from "react";
 import { Link } from "react-router-dom";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   ArrowLeft, Database, Layers, Hash, ZoomIn, Crosshair, MapPin, Search, Filter,
   Square, Triangle, Trash2, Maximize2, Download,
+  Send, Copy, Sparkles, Bot, User, RefreshCw, X, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useInternalPoiHeatmap } from "@/hooks/api/useInternalPoiHeatmap";
+import { usePoiChat } from "@/hooks/api/usePoiChat";
+import MessageBubble from "@/components/chat/MessageBubble";
+import type { ChatMessage } from "@/api/types";
 import { usePoiAnalysis } from "@/hooks/api/usePoiAnalysis";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useI18n } from "@/lib/i18n";
@@ -95,6 +103,97 @@ export default function InternalPoiHeatmap() {
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const mapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
+
+  // Chat reducer
+  type ChatState = {
+    open: boolean;
+    input: string;
+    messages: ChatMessage[];
+    loading: boolean;
+    error: string | null;
+    summary: string | null;
+    copiedMessageId: string | null;
+  };
+
+  type ChatAction =
+    | { type: "SET_OPEN"; payload: boolean }
+    | { type: "SET_INPUT"; payload: string }
+    | { type: "ADD_MESSAGE"; payload: ChatMessage }
+    | { type: "UPDATE_MESSAGE"; payload: { id: string; changes: Partial<ChatMessage> } }
+    | { type: "SET_LOADING"; payload: boolean }
+    | { type: "SET_ERROR"; payload: string | null }
+    | { type: "SET_SUMMARY"; payload: string }
+    | { type: "SET_COPIED_ID"; payload: string | null }
+    | { type: "CLEAR" }
+    | { type: "TRIM_MESSAGES"; payload: number }
+    | { type: "RESTORE"; payload: Partial<ChatState> & { messages: ChatMessage[] } };
+
+  const initialChatState: ChatState = {
+    open: false,
+    input: "",
+    messages: [],
+    loading: false,
+    error: null,
+    summary: null,
+    copiedMessageId: null,
+  };
+
+  function chatReducer(state: ChatState, action: ChatAction): ChatState {
+    switch (action.type) {
+      case "SET_OPEN":
+        return { ...state, open: action.payload };
+      case "SET_INPUT":
+        return { ...state, input: action.payload };
+      case "ADD_MESSAGE":
+        return { ...state, messages: [...state.messages, action.payload] };
+      case "UPDATE_MESSAGE":
+        return {
+          ...state,
+          messages: state.messages.map((m) =>
+            m.id === action.payload.id ? { ...m, ...action.payload.changes } : m,
+          ),
+        };
+      case "SET_LOADING":
+        return { ...state, loading: action.payload };
+      case "SET_ERROR":
+        return { ...state, error: action.payload };
+      case "SET_SUMMARY":
+        return { ...state, summary: action.payload };
+      case "SET_COPIED_ID":
+        return { ...state, copiedMessageId: action.payload };
+      case "CLEAR":
+        return { ...initialChatState, open: state.open };
+      case "TRIM_MESSAGES":
+        return {
+          ...state,
+          messages:
+            state.messages.length > action.payload
+              ? state.messages.slice(-action.payload)
+              : state.messages,
+        };
+      case "RESTORE":
+        return {
+          ...state,
+          messages: action.payload.messages,
+          summary: action.payload.summary ?? state.summary,
+          open: action.payload.open ?? state.open,
+          loading: false,
+          error: null,
+          input: "",
+        };
+      default:
+        return state;
+    }
+  }
+
+  const [chat, dispatch] = useReducer(chatReducer, initialChatState);
+  const poiChatMutation = usePoiChat();
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const chatScrollRef = useRef<number>(0);
+  const pendingNewAnalysisRef = useRef(false);
+  const prevAnalysisKeyRef = useRef<string | null>(null);
 
   const { data, isLoading, isError } = useInternalPoiHeatmap();
   const debouncedGeometry = useDebounce(drawnGeometry, 400);
@@ -756,6 +855,245 @@ export default function InternalPoiHeatmap() {
     URL.revokeObjectURL(url);
   }, [drawnGeometry, analysis]);
 
+  // Chat handlers
+  const createMessage = useCallback((role: ChatMessage["role"], content: string, status: ChatMessage["status"]): ChatMessage => {
+    return { id: crypto.randomUUID(), role, content, status };
+  }, []);
+
+  const handleSend = useCallback(() => {
+    const question = chat.input.trim();
+    if (!question || !analysis) return;
+
+    const userMsg = createMessage("user", question, "completed");
+    const pendingMsg = createMessage("assistant", "", "pending");
+
+    dispatch({ type: "ADD_MESSAGE", payload: userMsg });
+    dispatch({ type: "ADD_MESSAGE", payload: pendingMsg });
+    dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_ERROR", payload: null });
+    dispatch({ type: "SET_INPUT", payload: "" });
+
+    const history = chat.messages
+      .filter((m) => m.status !== "pending")
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const requestPayload = {
+      analysis: analysis.analysis,
+      question,
+      history,
+    };
+
+    poiChatMutation.mutate(requestPayload, {
+      onSuccess: (response) => {
+        dispatch({
+          type: "UPDATE_MESSAGE",
+          payload: { id: pendingMsg.id, changes: { content: response.answer, status: "completed" } },
+        });
+        if (response.summary) {
+          dispatch({ type: "SET_SUMMARY", payload: response.summary });
+        }
+        dispatch({ type: "SET_LOADING", payload: false });
+        dispatch({ type: "TRIM_MESSAGES", payload: 50 });
+      },
+      onError: () => {
+        dispatch({
+          type: "UPDATE_MESSAGE",
+          payload: {
+            id: pendingMsg.id,
+            changes: {
+              content: "Request failed",
+              status: "failed",
+              request: requestPayload,
+            },
+          },
+        });
+        dispatch({ type: "SET_LOADING", payload: false });
+        dispatch({ type: "SET_ERROR", payload: "Request failed" });
+      },
+    });
+  }, [chat.input, chat.messages, analysis, poiChatMutation, createMessage]);
+
+  const handleRetry = useCallback(
+    (request: ChatMessage["request"]) => {
+      if (!request || !analysis) return;
+
+      const pendingMsg = createMessage("assistant", "", "pending");
+      dispatch({ type: "ADD_MESSAGE", payload: pendingMsg });
+      dispatch({ type: "SET_LOADING", payload: true });
+
+      poiChatMutation.mutate(request, {
+        onSuccess: (response) => {
+          dispatch({
+            type: "UPDATE_MESSAGE",
+            payload: { id: pendingMsg.id, changes: { content: response.answer, status: "completed" } },
+          });
+          if (response.summary) {
+            dispatch({ type: "SET_SUMMARY", payload: response.summary });
+          }
+          dispatch({ type: "SET_LOADING", payload: false });
+          dispatch({ type: "TRIM_MESSAGES", payload: 50 });
+        },
+        onError: () => {
+          dispatch({
+            type: "UPDATE_MESSAGE",
+            payload: {
+              id: pendingMsg.id,
+              changes: { content: "Request failed", status: "failed", request },
+            },
+          });
+          dispatch({ type: "SET_LOADING", payload: false });
+        },
+      });
+    },
+    [analysis, poiChatMutation, createMessage],
+  );
+
+  const handleCopy = useCallback((content: string, messageId: string) => {
+    navigator.clipboard.writeText(content);
+    dispatch({ type: "SET_COPIED_ID", payload: messageId });
+    setTimeout(() => dispatch({ type: "SET_COPIED_ID", payload: null }), 2000);
+  }, []);
+
+  const suggestions = useMemo(() => {
+    if (!analysis) {
+      return [
+        "Summarize this area.",
+        "Explain the POI distribution.",
+        "What services dominate this area?",
+        "Which categories are underrepresented?",
+        "Is this area mixed-use?",
+        "Is it suitable for a pharmacy?",
+        "Is it suitable for a supermarket?",
+        "What businesses could be added?",
+        "Explain the POI density.",
+        "What are the strengths of this area?",
+        "What are the weaknesses of this area?",
+      ];
+    }
+
+    const topCats = analysis.analysis.top_categories ?? [];
+    const dominant = topCats[0]?.category;
+    const density = analysis.analysis.poi_density;
+
+    const s: string[] = ["Summarize this area.", "Explain the POI distribution."];
+
+    if (dominant) {
+      const d = dominant.toLowerCase();
+      s.push(`Why are ${d} businesses dominant here?`);
+      if (d.includes("restaurant") || d.includes("food") || d.includes("cafe")) {
+        s.push("Is this area a dining destination?");
+      } else if (d.includes("retail") || d.includes("shop") || d.includes("supermarket")) {
+        s.push("Is this area suitable for another supermarket?");
+      }
+    }
+
+    const present = new Set(topCats.map((c) => c.category.toLowerCase()));
+    if (!present.has("pharmacy") && !present.has("healthcare")) {
+      s.push("Would a pharmacy fit this area?");
+    }
+    if (!present.has("supermarket") && !present.has("grocery")) {
+      s.push("Would a supermarket fit this area?");
+    }
+
+    s.push(
+      "Which categories are underrepresented?",
+      "Is this area mixed-use?",
+      "What businesses could be added?",
+    );
+    if (density !== undefined) {
+      s.push(`Explain the POI density of ${density.toFixed(1)}/km².`);
+    }
+    s.push("What are the strengths of this area?", "What are the weaknesses of this area?");
+    return s.slice(0, 12);
+  }, [analysis]);
+
+  // Smart auto-scroll
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const threshold = 100;
+    const dist = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (dist < threshold) {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chat.messages]);
+
+  // Preserve chat during polygon editing — clear only after new analysis for a different polygon
+  useEffect(() => {
+    if (drawnGeometry === null) {
+      pendingNewAnalysisRef.current = true;
+    }
+  }, [drawnGeometry]);
+
+  useEffect(() => {
+    if (analysis && pendingNewAnalysisRef.current) {
+      const newKey = JSON.stringify(debouncedGeometry);
+      const oldKey = prevAnalysisKeyRef.current;
+      if (oldKey !== null && newKey !== oldKey) {
+        dispatch({ type: "CLEAR" });
+        dispatch({ type: "SET_SUMMARY", payload: null });
+      }
+      prevAnalysisKeyRef.current = newKey;
+      pendingNewAnalysisRef.current = false;
+    }
+  }, [analysis, debouncedGeometry]);
+
+  // Session persistence
+  const STORAGE_KEY = "poi-analysis-chat";
+  const analysisHashRef = useRef<string | null>(null);
+
+  // Compute current analysis hash
+  const currentAnalysisHash = useMemo(() => {
+    if (!analysis) return null;
+    return JSON.stringify(debouncedGeometry);
+  }, [analysis, debouncedGeometry]);
+
+  // Restore from sessionStorage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.messages && parsed.analysisHash && parsed.analysisHash === currentAnalysisHash) {
+          dispatch({ type: "RESTORE", payload: parsed });
+        }
+      }
+    } catch { /* ignore corrupt storage */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist to sessionStorage on state changes
+  useEffect(() => {
+    analysisHashRef.current = currentAnalysisHash;
+    const data = {
+      messages: chat.messages,
+      summary: chat.summary,
+      open: chat.open,
+      analysisHash: currentAnalysisHash,
+      timestamp: Date.now(),
+    };
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch { /* storage full */ }
+  }, [chat.messages, chat.summary, chat.open, currentAnalysisHash, analysis]);
+
+  // Auto-focus input + restore scroll when drawer opens
+  useEffect(() => {
+    if (chat.open) {
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+        if (chatContainerRef.current && chatScrollRef.current > 0) {
+          chatContainerRef.current.scrollTop = chatScrollRef.current;
+        }
+      }, 100);
+    } else {
+      // Save scroll position before closing
+      if (chatContainerRef.current) {
+        chatScrollRef.current = chatContainerRef.current.scrollTop;
+      }
+    }
+  }, [chat.open]);
+
   const drawHint = drawMode === "draw-rect"
     ? t("poi_analysis_draw_hint_rect")
     : drawMode === "draw-polygon"
@@ -1052,6 +1390,152 @@ export default function InternalPoiHeatmap() {
           </div>
         </aside>
       </div>
+
+      {/* Floating AI button */}
+      {drawnGeometry && analysis && !analysisLoading && (
+        <button
+          onClick={() => dispatch({ type: "SET_OPEN", payload: true })}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-primary text-primary-foreground px-4 py-3 shadow-lg hover:bg-primary/90 transition-all duration-200"
+        >
+          <Bot className="h-5 w-5" />
+          <span className="text-sm font-medium">AI Assistant</span>
+        </button>
+      )}
+
+      {/* AI Drawer (Dialog) */}
+      <Dialog open={chat.open} onOpenChange={(v) => dispatch({ type: "SET_OPEN", payload: v })}>
+        <DialogContent hideCloseButton className="flex flex-col max-w-[900px] w-[calc(100%-2rem)] h-[85vh] p-0 gap-0 sm:rounded-xl">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-border px-5 py-4 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Sparkles className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-semibold">Urban Planning Assistant</DialogTitle>
+                <p className="text-[11px] text-muted-foreground">
+                  {analysis?.analysis.reverse_geocoding?.area_name
+                    ? `Analyzing: ${analysis.analysis.reverse_geocoding.area_name}`
+                    : "Ask questions about the selected analysis"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {chat.messages.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs gap-1 text-muted-foreground"
+                  onClick={() => {
+                    dispatch({ type: "CLEAR" });
+                    dispatch({ type: "SET_SUMMARY", payload: null });
+                    sessionStorage.removeItem(STORAGE_KEY);
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" /> New Session
+                </Button>
+              )}
+              <button
+                onClick={() => dispatch({ type: "SET_OPEN", payload: false })}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* AI Summary Card (inside drawer, above conversation) */}
+          {chat.summary && (
+            <div className="mx-5 mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                AI Summary
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{chat.summary}</p>
+            </div>
+          )}
+
+          {/* Messages */}
+          <ScrollArea className="flex-1 px-5 py-4" ref={chatContainerRef}>
+            {chat.messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 mb-4">
+                  <Bot className="h-7 w-7 text-primary" />
+                </div>
+                <p className="text-sm font-medium text-foreground mb-1">How can I help you?</p>
+                <p className="text-xs text-muted-foreground max-w-md">
+                  Ask me anything about the selected area. I can explain land use, identify dominant services,
+                  highlight missing facilities, and help interpret the POI analysis.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4 pb-2">
+                {chat.messages.map((msg) => (
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    onCopy={handleCopy}
+                    onRetry={handleRetry}
+                    copiedId={chat.copiedMessageId}
+                  />
+                ))}
+                <div ref={chatBottomRef} />
+              </div>
+            )}
+          </ScrollArea>
+
+          {/* Input area */}
+          <div className="border-t border-border px-5 py-4 shrink-0 space-y-3">
+            {/* Suggested questions */}
+            {chat.messages.length === 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+                {suggestions.slice(0, 8).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      dispatch({ type: "SET_INPUT", payload: s });
+                      chatInputRef.current?.focus();
+                    }}
+                    className="shrink-0 text-[11px] px-3 py-1 rounded-full border border-border bg-secondary/30 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors whitespace-nowrap"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Textarea
+                ref={chatInputRef}
+                value={chat.input}
+                onChange={(e) => {
+                  dispatch({ type: "SET_INPUT", payload: e.target.value });
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Ask about this area..."
+                disabled={chat.loading}
+                className="min-h-[44px] max-h-[120px] text-sm resize-none"
+                rows={1}
+              />
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={!chat.input.trim() || chat.loading}
+                className="shrink-0 self-end h-[44px] w-[44px]"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

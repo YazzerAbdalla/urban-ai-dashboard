@@ -156,6 +156,26 @@ export interface PoiAnalysisResponse {
   };
 }
 
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  status: "pending" | "completed" | "failed";
+  request?: PoiChatRequest;
+}
+
+export interface PoiChatRequest {
+  analysis: PoiAnalysisResponse["analysis"];
+  question: string;
+  history?: { role: "user" | "assistant"; content: string }[];
+}
+
+export interface PoiChatResponse {
+  summary: string;
+  answer: string;
+  model: string;
+}
+
 export interface CancelResponse {
   status: "cancelled";
   job_id: string;

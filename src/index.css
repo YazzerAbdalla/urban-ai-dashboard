@@ -129,3 +129,16 @@ All colors MUST be HSL.
   color: hsl(var(--muted-foreground)) !important;
 }
 .maplibregl-ctrl-attrib a { color: hsl(var(--primary)) !important; }
+
+/* Prose overrides for dark chat theme */
+.prose { color: hsl(var(--foreground)); max-width: none; }
+.prose strong { color: hsl(var(--foreground)); }
+.prose code {
+  color: hsl(var(--accent));
+  background: hsl(var(--secondary));
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.8em;
+}
+.prose h1, .prose h2, .prose h3 { color: hsl(var(--foreground)); }
+.prose ul, .prose ol { color: hsl(var(--muted-foreground)); }
