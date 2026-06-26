@@ -252,26 +252,6 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
           </div>
         </Section>
 
-        <Section title={t("model")}>
-          <div className="grid grid-cols-2 gap-1">
-            {(["mlp", "gnn"] as const).map((m) => (
-              <button key={m} onClick={() => setModelType(m)}
-                className={cn("h-8 text-xs rounded border", modelType === m ? "bg-primary text-primary-foreground border-primary" : "border-border bg-secondary hover:bg-muted")}>
-                {m === "mlp" ? t("model_mlp") : t("model_gnn")}
-              </button>
-            ))}
-          </div>
-          <Label className="text-xs text-muted-foreground pt-1">{t("fusion")}</Label>
-          <Select value={fusion} onValueChange={(v) => setFusion(v as FusionMethod)}>
-            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="concat">{t("fusion_concat")}</SelectItem>
-              <SelectItem value="weighted">{t("fusion_weighted")}</SelectItem>
-              <SelectItem value="attention">{t("fusion_attention")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </Section>
-
         <div>
           {classifying
             ? <Button variant="destructive" className="w-full h-10" onClick={onCancel}>{t("cancel")}</Button>
@@ -284,8 +264,6 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
           {poiHeatmapEmpty && (
             <p className="text-[11px] text-muted-foreground pl-6">No POIs available for the selected area.</p>
           )}
-          <LayerRow label={t("layer_roads")} value={layers.roads} onChange={(v) => setLayer("roads", v)} />
-          <LayerRow label={t("layer_graph")} value={layers.graph} onChange={(v) => setLayer("graph", v)} />
           <LayerRow label={t("layer_satellite")} value={layers.satellite} onChange={(v) => setLayer("satellite", v)} />
         </Section>
       </div>

@@ -8,10 +8,6 @@ export function TopBar() {
   const loc = useLocation();
   const navItems = [
     { to: "/", label: t("nav_dashboard"), icon: MapIcon },
-    { to: "/mllm-builder", label: t("nav_mllm"), icon: Brain },
-    { to: "/digital-twin", label: t("nav_twin"), icon: Cpu },
-    { to: "/training-lab", label: t("nav_training"), icon: FlaskConical },
-    { to: "/ablation", label: t("nav_ablation"), icon: GitCompare },
     { to: "/internal/poi-heatmap", label: t("nav_poi_heatmap"), icon: Thermometer },
     { to: "/poi-manager", label: t("nav_poi_manager"), icon: Upload },
   ];
