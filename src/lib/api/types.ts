@@ -24,6 +24,7 @@ export interface CellDatum {
   graph_embedding_norm: number;
   text_embedding_norm: number;
   satellite_thumb: string;
+  gridId: string;
   geometry: { type: "Polygon"; coordinates: number[][][] };
   centroid: [number, number];
 }

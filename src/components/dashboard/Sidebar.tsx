@@ -57,6 +57,7 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
     setDrawnGeometry,
     searchLocation,
     setSearchLocation,
+    poiHeatmapEmpty,
   } = useDash();
 
   /**
@@ -280,6 +281,9 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
         <Section title={t("layers")}>
           <LayerRow label={t("layer_classification")} value={layers.classification} onChange={(v) => setLayer("classification", v)} />
           <LayerRow label={t("layer_poi")} value={layers.poi} onChange={(v) => setLayer("poi", v)} />
+          {poiHeatmapEmpty && (
+            <p className="text-[11px] text-muted-foreground pl-6">No POIs available for the selected area.</p>
+          )}
           <LayerRow label={t("layer_roads")} value={layers.roads} onChange={(v) => setLayer("roads", v)} />
           <LayerRow label={t("layer_graph")} value={layers.graph} onChange={(v) => setLayer("graph", v)} />
           <LayerRow label={t("layer_satellite")} value={layers.satellite} onChange={(v) => setLayer("satellite", v)} />

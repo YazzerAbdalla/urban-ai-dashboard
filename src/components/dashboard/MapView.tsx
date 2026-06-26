@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
 import { cairoBbox } from "@/lib/api/mockClient";
 import { useGraphTopology } from "@/hooks/api/useGraphTopology";
+import { usePoiHeatmap } from "@/hooks/api/usePoiHeatmap";
 import { classHex, opacityFromConfidence } from "@/lib/colors";
 import { createSmallDefaultArea } from "@/lib/geoUtils";
+import type { CellDatum } from "@/lib/api/types";
 
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -35,12 +37,20 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
   ],
 };
 
-export function MapView() {
+interface MapViewProps {
+  jobId?: string | null;
+  gridId?: string | null;
+  cells?: CellDatum[];
+}
+
+export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const navigate = useNavigate();
 
-  const cells = useDash((s) => s.cells);
+  const [mapReady, setMapReady] = useState(false);
+
+  const storeCells = useDash((s) => s.cells);
   const layers = useDash((s) => s.layers);
   const loaded = useDash((s) => s.loaded);
   const selectedCellId = useDash((s) => s.selectedCellId);
@@ -50,12 +60,27 @@ export function MapView() {
   const drawMode = useDash((s) => s.drawMode);
   const setDrawMode = useDash((s) => s.setDrawMode);
   const searchLocation = useDash((s) => s.searchLocation);
-  const gridId = useDash((s) => s.gridId);
-  const graphQ = useGraphTopology(gridId, { enabled: !!gridId && layers.graph });
+  const storeGridId = useDash((s) => s.gridId);
+
+  // Use passed props when available, fall back to store values
+  const effectiveCells = propCells ?? storeCells;
+  const effectiveGridId = propGridId ?? storeGridId;
+  const graphQ = useGraphTopology(effectiveGridId, { enabled: !!effectiveGridId && layers.graph });
+  const poiHeatmapQ = usePoiHeatmap(effectiveGridId, {
+    enabled: !!effectiveGridId && layers.poi,
+  });
+
+  // Refs so the mount-only click handlers always read latest values
+  const cellsRef = useRef(effectiveCells);
+  cellsRef.current = effectiveCells;
+  const jobIdRef = useRef(jobId);
+  jobIdRef.current = jobId;
+  const gridIdRef = useRef(propGridId);
+  gridIdRef.current = propGridId;
 
   // FeatureCollection for current classified cells
   const cellsFC = useMemo(() => {
-    const features = cells.map((c) => {
+    const features = effectiveCells.map((c) => {
       const fill = classHex[c.class as keyof typeof classHex] || classHex.Residential;
       const opacity = opacityFromConfidence(c.confidence);
       return {
@@ -70,7 +95,7 @@ export function MapView() {
       features.forEach((f) => console.log("  id:", f.id, "class:", f.properties.class, "fill:", f.properties.fill));
     }
     return { type: "FeatureCollection" as const, features };
-  }, [cells]);
+  }, [effectiveCells]);
 
   // Split backend graph-topology FeatureCollection into nodes + edges
   const graphSplit = useMemo(() => {
@@ -125,6 +150,96 @@ export function MapView() {
         source: "bbox",
         paint: { "line-color": "#22d3ee", "line-width": 1.5, "line-dasharray": [3, 2] },
       });
+
+      // POI Heatmap
+      if (!map.getSource("poi-heatmap-source")) {
+        map.addSource("poi-heatmap-source", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+      }
+      if (!map.getLayer("poi-heatmap-layer")) {
+        map.addLayer(
+          {
+            id: "poi-heatmap-layer",
+            type: "heatmap",
+            source: "poi-heatmap-source",
+            layout: { visibility: "none" },
+            paint: {
+              "heatmap-weight": [
+                "case",
+                ["has", "weight"],
+                ["interpolate", ["linear"], ["get", "weight"], 0, 0, 1, 1],
+                1,
+              ],
+              "heatmap-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                8, 40,
+                18, 5,
+              ],
+              "heatmap-intensity": [
+                "interpolate", ["linear"], ["zoom"],
+                8, 1,
+                18, 0.5,
+              ],
+              "heatmap-color": [
+                "interpolate", ["linear"], ["heatmap-density"],
+                0, "rgba(255,255,178,0)",
+                0.25, "rgb(254,204,92)",
+                0.5, "rgb(253,141,60)",
+                0.75, "rgb(240,59,32)",
+                1, "rgb(153,0,0)",
+              ],
+              "heatmap-opacity": 0.85,
+            },
+          },
+        );
+      }
+      if (!map.getLayer("poi-heatmap-debug")) {
+        map.addLayer({
+          id: "poi-heatmap-debug",
+          type: "circle",
+          source: "poi-heatmap-source",
+          paint: {
+            "circle-radius": [
+              "case",
+              [">=", ["zoom"], 12],
+              9,
+              0,
+            ],
+            "circle-color": "#e63946",
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 1.5,
+            "circle-opacity": 0.9,
+          },
+        });
+      }
+
+      map.on("click", "poi-heatmap-debug", (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const p = f.properties || {};
+        const coords = (f.geometry as GeoJSON.Point).coordinates;
+        const html = `
+          <div style="font-size:12px;line-height:1.6;color:#000;max-width:260px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:4px">${p.name || "—"}</div>
+            <table style="width:100%;border-collapse:collapse">
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Category</td><td style="font-family:monospace">${p.category || "—"}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Place Type</td><td style="font-family:monospace">${p.place_type || "—"}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">OSM ID</td><td style="font-family:monospace">${p.osm_id || "—"}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Label</td><td style="font-family:monospace">${p.label || "—"}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Coords</td><td style="font-family:monospace">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</td></tr>
+            </table>
+          </div>
+        `;
+        new maplibregl.Popup({ offset: 14, closeButton: true, maxWidth: "300px" })
+          .setLngLat(coords as [number, number])
+          .setHTML(html)
+          .addTo(map);
+      });
+
+      map.on("mouseenter", "poi-heatmap-debug", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "poi-heatmap-debug", () => (map.getCanvas().style.cursor = ""));
 
       // Classified cells
       map.addSource("cells", { type: "geojson", data: cellsFC });
@@ -188,6 +303,8 @@ export function MapView() {
         paint: { "line-color": "#22d3ee", "line-width": 2 },
       });
 
+      setMapReady(true);
+
       // Click handler
       map.on("click", "cells-fill", (e) => {
         if (useDash.getState().drawMode) return;
@@ -202,7 +319,15 @@ export function MapView() {
         const f = e.features?.[0];
         if (!f) return;
         e.preventDefault();
-        navigate(`/grid/${f.properties?.id}/details`);
+        if (import.meta.env.DEV) {
+          console.log("[MapView] double-click feature properties:", f.properties);
+        }
+        const cellId = String(f.properties?.id ?? f.properties?.cell_id ?? "");
+        const cell = cellsRef.current.find((c) => c.id === cellId);
+        const jId = jobIdRef.current ?? useDash.getState().classifyJobId;
+        if (jId && cellId) {
+          navigate(`/classification/${jId}/cell/${cellId}`);
+        }
       });
       map.on("mouseenter", "cells-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "cells-fill", () => (map.getCanvas().style.cursor = ""));
@@ -239,6 +364,42 @@ export function MapView() {
     (map.getSource("graph-edges") as maplibregl.GeoJSONSource | undefined)?.setData(graphSplit.edges as any);
     (map.getSource("graph-nodes") as maplibregl.GeoJSONSource | undefined)?.setData(graphSplit.nodes as any);
   }, [graphSplit]);
+
+  // POI Heatmap data sync
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const data = poiHeatmapQ.data;
+    if (!data) return;
+
+    if (data.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+      if (import.meta.env.DEV) console.warn("[MapView] poi-heatmap: invalid GeoJSON");
+      return;
+    }
+
+    const src = map.getSource("poi-heatmap-source") as maplibregl.GeoJSONSource;
+    if (!src) return;
+
+    if (data.features.length === 0) {
+      useDash.getState().setPoiHeatmapEmpty(true);
+      map.setLayoutProperty("poi-heatmap-layer", "visibility", "none");
+      return;
+    }
+
+    useDash.getState().setPoiHeatmapEmpty(false);
+    src.setData(data as any);
+
+    map.setLayoutProperty("poi-heatmap-layer", "visibility", "visible");
+
+    if (import.meta.env.DEV) {
+      const srcCheck = map.getSource("poi-heatmap-source") as maplibregl.GeoJSONSource;
+      console.log(`[MapView] poi-heatmap loaded — ${data.features.length} features, source exists: ${!!srcCheck}, layer visible: ${map.getLayoutProperty("poi-heatmap-layer", "visibility")}`);
+      data.features.forEach((f, i) => {
+        console.log(`  [${i}]`, f.geometry?.coordinates, f.properties?.name);
+      });
+    }
+  }, [poiHeatmapQ.data, mapReady]);
 
   // Compute active preview geometry (priority: drawnGeometry, fallback: searchLocation default area)
   const displayGeometry = useMemo(() => {
@@ -332,6 +493,17 @@ export function MapView() {
     map.setLayoutProperty("graph-nodes", "visibility", layers.graph ? "visible" : "none");
     map.setLayoutProperty("sat-bg", "visibility", layers.satellite ? "visible" : "none");
     map.setLayoutProperty("osm-bg", "visibility", layers.satellite ? "none" : "visible");
+    if (map.getLayer("poi-heatmap-layer")) {
+      const vis = layers.poi && !useDash.getState().poiHeatmapEmpty ? "visible" : "none";
+      map.setLayoutProperty("poi-heatmap-layer", "visibility", vis);
+      if (import.meta.env.DEV && vis === "visible") {
+        console.log("[MapView] poi-heatmap visibility: visible");
+      }
+    }
+    if (map.getLayer("poi-heatmap-debug")) {
+      const vis = layers.poi && !useDash.getState().poiHeatmapEmpty ? "visible" : "none";
+      map.setLayoutProperty("poi-heatmap-debug", "visibility", vis);
+    }
   }, [layers, loaded]);
 
   // Selection feature-state

@@ -2,12 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { ArrowLeft, Database, Layers, Hash, ZoomIn, Crosshair, MapPin, Search, Filter } from "lucide-react";
+import {
+  ArrowLeft, Database, Layers, Hash, ZoomIn, Crosshair, MapPin, Search, Filter,
+  Square, Triangle, Trash2, Maximize2, Download,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useInternalPoiHeatmap } from "@/hooks/api/useInternalPoiHeatmap";
+import { usePoiAnalysis } from "@/hooks/api/usePoiAnalysis";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useI18n } from "@/lib/i18n";
 import { cairoBbox } from "@/lib/api/mockClient";
+import { getBboxFromGeometry } from "@/lib/geoUtils";
+import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList,
+} from "recharts";
 import type { InternalPoiHeatmapPoiProperties } from "@/api/types";
+import type { DrawnGeometry } from "@/store/dashboardStore";
 
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -24,29 +37,76 @@ const OSM_STYLE: maplibregl.StyleSpecification = {
   layers: [{ id: "osm-bg", type: "raster", source: "osm" }],
 };
 
+function rectRing(a: maplibregl.LngLat, b: maplibregl.LngLat): [number, number][] {
+  return [
+    [a.lng, a.lat],
+    [b.lng, a.lat],
+    [b.lng, b.lat],
+    [a.lng, b.lat],
+    [a.lng, a.lat],
+  ];
+}
+
+function poiPopupHtml(props: InternalPoiHeatmapPoiProperties, coords: [number, number]): string {
+  return `
+    <div style="font-size:12px;line-height:1.6;color:#000;max-width:260px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">${props.name}</div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Category</td><td style="font-family:monospace">${props.category}</td></tr>
+        <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Place Type</td><td style="font-family:monospace">${props.place_type}</td></tr>
+        <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">OSM ID</td><td style="font-family:monospace">${props.osm_id}</td></tr>
+        <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Label</td><td style="font-family:monospace">${props.label}</td></tr>
+        <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Coords</td><td style="font-family:monospace">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</td></tr>
+      </table>
+    </div>
+  `;
+}
+
+function formatCentroid(centroid: { type: string; coordinates: [number, number] } | undefined | null): string {
+  if (!centroid?.coordinates) return "—";
+  const [lng, lat] = centroid.coordinates;
+  return `Lat: ${typeof lat === "number" ? lat.toFixed(6) : "—"}, Lng: ${typeof lng === "number" ? lng.toFixed(6) : "—"}`;
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
 export default function InternalPoiHeatmap() {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const drawVerticesRef = useRef<[number, number][]>([]);
+  const polygonLiveRef = useRef<boolean>(false);
+
   const [zoom, setZoom] = useState(10.4);
   const [mouseCoords, setMouseCoords] = useState<{ lng: number; lat: number } | null>(null);
   const [poiSearch, setPoiSearch] = useState("");
+  const [searchCategory, setSearchCategory] = useState("__all");
   const [cairoOnly, setCairoOnly] = useState(false);
+  const [drawMode, setDrawMode] = useState<"idle" | "draw-rect" | "draw-polygon">("idle");
+  const [drawnGeometry, setDrawnGeometry] = useState<DrawnGeometry>(null);
+  const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const mapDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
 
   const { data, isLoading, isError } = useInternalPoiHeatmap();
+  const debouncedGeometry = useDebounce(drawnGeometry, 400);
+  const { data: analysis, isLoading: analysisLoading, isError: analysisError } = usePoiAnalysis(debouncedGeometry);
 
   const metadata = data?.metadata;
-
   const pois = useMemo(() => data?.features ?? [], [data]);
   const isEmpty = !isLoading && !isError && pois.length === 0;
 
   const isInsideCairo = useCallback((coords: [number, number]) => {
     const [lng, lat] = coords;
-    return (
-      lat >= cairoBbox.south && lat <= cairoBbox.north &&
-      lng >= cairoBbox.west && lng <= cairoBbox.east
-    );
+    return lat >= cairoBbox.south && lat <= cairoBbox.north && lng >= cairoBbox.west && lng <= cairoBbox.east;
   }, []);
 
   const poiCairoFlags = useMemo(() => {
@@ -73,6 +133,12 @@ export default function InternalPoiHeatmap() {
     return cats;
   }, [pois]);
 
+  const allCategories = useMemo(() => {
+    const cats = [...new Set(pois.map((f) => f.properties.category))];
+    cats.sort();
+    return cats;
+  }, [pois]);
+
   const filteredPois = useMemo(() => {
     let list = pois;
     if (cairoOnly) {
@@ -83,29 +149,62 @@ export default function InternalPoiHeatmap() {
     }
     if (poiSearch) {
       const q = poiSearch.toLowerCase();
-      list = list.filter((f) => f.properties.name.toLowerCase().includes(q));
+      list = list.filter((f) => {
+        const props = f.properties;
+        return (
+          props.name.toLowerCase().includes(q) ||
+          props.category.toLowerCase().includes(q) ||
+          props.place_type.toLowerCase().includes(q)
+        );
+      });
+    }
+    if (searchCategory !== "__all") {
+      list = list.filter((f) => f.properties.category === searchCategory);
     }
     return list;
-  }, [pois, cairoOnly, poiSearch, isInsideCairo]);
+  }, [pois, cairoOnly, poiSearch, searchCategory, isInsideCairo]);
 
   const mapData = useMemo(() => {
     if (!data) return null;
-    if (!cairoOnly) return data as unknown as GeoJSON.FeatureCollection;
-    return {
-      type: "FeatureCollection" as const,
-      features: data.features.filter((f) => {
-        const coords = (f.geometry as GeoJSON.Point).coordinates;
-        return isInsideCairo(coords as [number, number]);
-      }),
-    };
+    const fc = !cairoOnly
+      ? (data as unknown as GeoJSON.FeatureCollection)
+      : {
+          type: "FeatureCollection" as const,
+          features: data.features.filter((f) => {
+            const coords = (f.geometry as GeoJSON.Point).coordinates;
+            return isInsideCairo(coords as [number, number]);
+          }),
+        };
+    mapDataRef.current = fc;
+    return fc;
   }, [data, cairoOnly, isInsideCairo]);
 
-  const flyToPoi = (coords: [number, number]) => {
+  const showPoiPopup = useCallback((props: InternalPoiHeatmapPoiProperties, coords: [number, number]) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (popupRef.current) popupRef.current.remove();
+    const popup = new maplibregl.Popup({ offset: 14, closeButton: true, maxWidth: "300px" })
+      .setLngLat(coords)
+      .setHTML(poiPopupHtml(props, coords))
+      .addTo(map);
+    popupRef.current = popup;
+  }, []);
+
+  const flyToPoi = useCallback((coords: [number, number]) => {
     const map = mapRef.current;
     if (!map) return;
     map.flyTo({ center: coords, zoom: 16, essential: true });
-  };
+  }, []);
 
+  const handlePoiSelect = useCallback((f: GeoJSON.Feature<GeoJSON.Point, InternalPoiHeatmapPoiProperties>) => {
+    const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+    const id = f.properties.osm_id || `${coords[0]}_${coords[1]}`;
+    setSelectedPoiId(id);
+    flyToPoi(coords);
+    showPoiPopup(f.properties, coords);
+  }, [flyToPoi, showPoiPopup]);
+
+  // Map init
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
@@ -119,11 +218,37 @@ export default function InternalPoiHeatmap() {
     mapRef.current = map;
 
     map.on("load", () => {
+      map.resize();
       map.addSource("internal-poi-source", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       });
 
+      // Drawn polygon sources
+      map.addSource("drawn", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource("draw-preview", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      // POI highlight sources
+      map.addSource("poi-inside", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource("poi-outside", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource("poi-selected", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      // Heatmap layer
       map.addLayer({
         id: "internal-poi-heatmap",
         type: "heatmap",
@@ -157,16 +282,18 @@ export default function InternalPoiHeatmap() {
         },
       });
 
+      // Circle layers
       map.addLayer({
         id: "internal-poi-circle",
         type: "circle",
         source: "internal-poi-source",
         paint: {
           "circle-radius": [
-            "case",
-            [">=", ["zoom"], 12],
-            9,
-            0,
+            "interpolate", ["linear"], ["zoom"],
+            0, 0,
+            12, 0,
+            12.01, 9,
+            22, 9,
           ],
           "circle-color": "#e63946",
           "circle-stroke-color": "#ffffff",
@@ -175,52 +302,465 @@ export default function InternalPoiHeatmap() {
         },
       });
 
+      // POI outside (faded) — hidden by default
+      map.addLayer({
+        id: "poi-outside-faded",
+        type: "circle",
+        source: "poi-outside",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            0, 0,
+            12, 0,
+            12.01, 9,
+            22, 9,
+          ],
+          "circle-color": "#6b7280",
+          "circle-opacity": 0.15,
+          "circle-stroke-color": "#6b7280",
+          "circle-stroke-width": 0.5,
+        },
+      });
+
+      // POI inside (highlight) — hidden by default
+      map.addLayer({
+        id: "poi-inside-highlight",
+        type: "circle",
+        source: "poi-inside",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            0, 0,
+            12, 0,
+            12.01, 10,
+            22, 10,
+          ],
+          "circle-color": "#3B82F6",
+          "circle-opacity": 0.85,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+        },
+      });
+
+      // Drawn polygon fill
+      map.addLayer({
+        id: "drawn-fill",
+        type: "fill",
+        source: "drawn",
+        paint: {
+          "fill-color": "#3B82F6",
+          "fill-opacity": 0.15,
+        },
+      });
+
+      // Drawn polygon line
+      map.addLayer({
+        id: "drawn-line",
+        type: "line",
+        source: "drawn",
+        paint: {
+          "line-color": "#3B82F6",
+          "line-width": 2.5,
+          "line-dasharray": [4, 2],
+        },
+      });
+
+      // Drawn vertices
+      map.addLayer({
+        id: "drawn-vertices",
+        type: "circle",
+        source: "draw-preview",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#3B82F6",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        },
+      });
+
+      // Selected POI highlight (topmost)
+      map.addLayer({
+        id: "poi-selected-highlight",
+        type: "circle",
+        source: "poi-selected",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": 14,
+          "circle-color": "#FCD34D",
+          "circle-opacity": 0.7,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
+        },
+      });
+
+      // Click on existing circles
       map.on("click", "internal-poi-circle", (e) => {
         const f = e.features?.[0];
         if (!f) return;
         const props = f.properties as unknown as InternalPoiHeatmapPoiProperties;
-        const coords = (f.geometry as GeoJSON.Point).coordinates;
-        const html = `
-          <div style="font-size:12px;line-height:1.6;color:#000;max-width:260px">
-            <div style="font-weight:700;font-size:13px;margin-bottom:4px">${props.name}</div>
-            <table style="width:100%;border-collapse:collapse">
-              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Category</td><td style="font-family:monospace">${props.category}</td></tr>
-              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Place Type</td><td style="font-family:monospace">${props.place_type}</td></tr>
-              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">OSM ID</td><td style="font-family:monospace">${props.osm_id}</td></tr>
-              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Label</td><td style="font-family:monospace">${props.label}</td></tr>
-              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Coords</td><td style="font-family:monospace">${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}</td></tr>
-            </table>
-          </div>
-        `;
-        if (popupRef.current) popupRef.current.remove();
-        const popup = new maplibregl.Popup({ offset: 14, closeButton: true, maxWidth: "300px" })
-          .setLngLat(coords as [number, number])
-          .setHTML(html)
-          .addTo(map);
-        popupRef.current = popup;
+        const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+        showPoiPopup(props, coords);
+      });
+
+      // Click on inside highlight
+      map.on("click", "poi-inside-highlight", (e) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const props = f.properties as unknown as InternalPoiHeatmapPoiProperties;
+        const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+        const id = props.osm_id || `${coords[0]}_${coords[1]}`;
+        setSelectedPoiId(id);
+        showPoiPopup(props, coords);
       });
 
       map.on("mouseenter", "internal-poi-circle", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "internal-poi-circle", () => (map.getCanvas().style.cursor = ""));
+      map.on("mouseenter", "poi-inside-highlight", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "poi-inside-highlight", () => (map.getCanvas().style.cursor = ""));
 
       map.on("zoom", () => setZoom(map.getZoom()));
       map.on("mousemove", (e) => setMouseCoords({ lng: e.lngLat.lng, lat: e.lngLat.lat }));
+
+      // If data already loaded, populate sources now
+      const existingData = mapDataRef.current;
+      if (existingData && existingData.features.length > 0) {
+        const src = map.getSource("internal-poi-source") as maplibregl.GeoJSONSource | undefined;
+        if (src) src.setData(existingData);
+      }
+
+      setMapReady(true);
     });
 
     return () => {
       map.remove();
       mapRef.current = null;
+      setMapReady(false);
     };
-  }, []);
+  }, [showPoiPopup]);
 
+  // Resize map when container dimensions change
+  useEffect(() => {
+    const map = mapRef.current;
+    const el = containerRef.current;
+    if (!map || !el) return;
+    const ro = new ResizeObserver(() => { if (map.loaded()) map.resize(); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mapReady]);
+
+  // Sync heatmap data
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded() || !mapData) return;
     const src = map.getSource("internal-poi-source") as maplibregl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData(mapData);
+    if (src) src.setData(mapData);
+  }, [mapData, mapReady]);
+
+  // Sync drawn geometry to map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    if (drawnGeometry) {
+      src.setData({
+        type: "FeatureCollection",
+        features: [{ type: "Feature", properties: {}, geometry: drawnGeometry } as GeoJSON.Feature],
+      });
+    } else {
+      src.setData(empty);
     }
-  }, [mapData]);
+  }, [drawnGeometry, mapReady]);
+
+  // Clear previous selection when starting a new draw
+  useEffect(() => {
+    if (drawMode !== "idle") {
+      setDrawnGeometry(null);
+      setSelectedPoiId(null);
+      drawVerticesRef.current = [];
+      polygonLiveRef.current = false;
+      if (popupRef.current) {
+        popupRef.current.remove();
+        popupRef.current = null;
+      }
+    }
+  }, [drawMode]);
+
+  // Rectangle drawing
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (drawMode !== "draw-rect") {
+      map.getCanvas().style.cursor = "";
+      return;
+    }
+    const canvas = map.getCanvas();
+    canvas.style.cursor = "crosshair";
+    map.dragPan.disable();
+    map.boxZoom.disable();
+
+    let start: maplibregl.LngLat | null = null;
+
+    const onDown = (e: maplibregl.MapMouseEvent) => { start = e.lngLat; };
+    const onMove = (e: maplibregl.MapMouseEvent) => {
+      if (!start) return;
+      const ring = rectRing(start, e.lngLat);
+      const src = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } as GeoJSON.Polygon }],
+      };
+      src?.setData(fc);
+    };
+    const onUp = (e: maplibregl.MapMouseEvent) => {
+      if (!start) return;
+      const ring = rectRing(start, e.lngLat);
+      setDrawnGeometry({ type: "Polygon", coordinates: [ring] });
+      setDrawMode("idle");
+      map.dragPan.enable();
+      map.boxZoom.enable();
+      start = null;
+    };
+
+    map.on("mousedown", onDown);
+    map.on("mousemove", onMove);
+    map.on("mouseup", onUp);
+    return () => {
+      map.off("mousedown", onDown);
+      map.off("mousemove", onMove);
+      map.off("mouseup", onUp);
+      map.dragPan.enable();
+      map.boxZoom.enable();
+    };
+  }, [drawMode]);
+
+  // Polygon drawing
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (drawMode !== "draw-polygon") {
+      map.getCanvas().style.cursor = "";
+      return;
+    }
+    const canvas = map.getCanvas();
+    canvas.style.cursor = "crosshair";
+    map.dragPan.disable();
+    map.boxZoom.disable();
+    map.doubleClickZoom.disable();
+    drawVerticesRef.current = [];
+    polygonLiveRef.current = true;
+
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      drawVerticesRef.current.push([e.lngLat.lng, e.lngLat.lat]);
+      updatePreview(map, drawVerticesRef.current);
+    };
+
+    const onDblClick = () => {
+      finishPolygon(map);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        cancelPolygon(map);
+      }
+    };
+
+    map.on("click", onClick);
+    map.on("dblclick", onDblClick);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      map.off("click", onClick);
+      map.off("dblclick", onDblClick);
+      window.removeEventListener("keydown", onKeyDown);
+      map.dragPan.enable();
+      map.boxZoom.enable();
+      map.doubleClickZoom.enable();
+    };
+  }, [drawMode]);
+
+  function updatePreview(map: maplibregl.Map, vertices: [number, number][]) {
+    const previewSrc = map.getSource("draw-preview") as maplibregl.GeoJSONSource | undefined;
+    if (!previewSrc) return;
+    if (vertices.length < 2) {
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: vertices.length === 1 ? [{
+          type: "Feature", properties: {},
+          geometry: { type: "Point", coordinates: vertices[0] },
+        } as GeoJSON.Feature] : [],
+      };
+      previewSrc.setData(fc);
+      return;
+    }
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [...vertices, vertices[0]] } as GeoJSON.LineString },
+        ...vertices.map((v): GeoJSON.Feature => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: v } })),
+      ],
+    };
+    previewSrc.setData(fc);
+  }
+
+  function finishPolygon(map: maplibregl.Map) {
+    const vertices = drawVerticesRef.current;
+    if (vertices.length < 3) {
+      setDrawMode("idle");
+      map.dragPan.enable();
+      map.boxZoom.enable();
+      map.doubleClickZoom.enable();
+      return;
+    }
+    const ring = [...vertices, vertices[0]];
+    setDrawnGeometry({ type: "Polygon", coordinates: [ring] });
+    setDrawMode("idle");
+    polygonLiveRef.current = false;
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const previewSrc = map.getSource("draw-preview") as maplibregl.GeoJSONSource | undefined;
+    previewSrc?.setData(empty);
+    map.dragPan.enable();
+    map.boxZoom.enable();
+    map.doubleClickZoom.enable();
+  }
+
+  function cancelPolygon(map: maplibregl.Map) {
+    drawVerticesRef.current = [];
+    polygonLiveRef.current = false;
+    setDrawMode("idle");
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const previewSrc = map.getSource("draw-preview") as maplibregl.GeoJSONSource | undefined;
+    previewSrc?.setData(empty);
+    const drawnSrc = map.getSource("drawn") as maplibregl.GeoJSONSource | undefined;
+    drawnSrc?.setData(empty);
+    map.dragPan.enable();
+    map.boxZoom.enable();
+    map.doubleClickZoom.enable();
+  }
+
+  // Zoom to selection on draw complete
+  useEffect(() => {
+    if (!drawnGeometry) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const bbox = getBboxFromGeometry(drawnGeometry);
+    if (bbox) {
+      map.fitBounds([[bbox.west, bbox.south], [bbox.east, bbox.north]], { padding: 60, maxZoom: 16 });
+    }
+  }, [drawnGeometry]);
+
+  const handleZoomToSelection = useCallback(() => {
+    if (!drawnGeometry) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const bbox = getBboxFromGeometry(drawnGeometry);
+    if (bbox) {
+      map.fitBounds([[bbox.west, bbox.south], [bbox.east, bbox.north]], { padding: 60, maxZoom: 16 });
+    }
+  }, [drawnGeometry]);
+
+  const handleDelete = useCallback(() => {
+    setDrawnGeometry(null);
+    setSelectedPoiId(null);
+    setDrawMode("idle");
+  }, []);
+
+  // Sync POI highlight/fade layers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const insideSrc = map.getSource("poi-inside") as maplibregl.GeoJSONSource | undefined;
+    const outsideSrc = map.getSource("poi-outside") as maplibregl.GeoJSONSource | undefined;
+    if (!insideSrc || !outsideSrc) return;
+
+    const circleLayer = map.getLayer("internal-poi-circle");
+    const fadedLayer = map.getLayer("poi-outside-faded");
+    const highlightLayer = map.getLayer("poi-inside-highlight");
+
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    if (!drawnGeometry) {
+      if (circleLayer) map.setLayoutProperty("internal-poi-circle", "visibility", "visible");
+      if (fadedLayer) map.setLayoutProperty("poi-outside-faded", "visibility", "none");
+      if (highlightLayer) map.setLayoutProperty("poi-inside-highlight", "visibility", "none");
+      insideSrc.setData(empty);
+      outsideSrc.setData(empty);
+      return;
+    }
+
+    const polygon = drawnGeometry;
+    const inside: GeoJSON.Feature[] = [];
+    const outside: GeoJSON.Feature[] = [];
+
+    for (const f of pois) {
+      const coords = (f.geometry as GeoJSON.Point).coordinates;
+      const insidePoly = booleanPointInPolygon(coords as [number, number], polygon as GeoJSON.Polygon);
+      if (insidePoly) {
+        inside.push(f);
+      } else {
+        outside.push(f);
+      }
+    }
+
+    if (circleLayer) map.setLayoutProperty("internal-poi-circle", "visibility", "none");
+    if (fadedLayer) map.setLayoutProperty("poi-outside-faded", "visibility", "visible");
+    if (highlightLayer) map.setLayoutProperty("poi-inside-highlight", "visibility", "visible");
+
+    insideSrc.setData({ type: "FeatureCollection", features: inside });
+    outsideSrc.setData({ type: "FeatureCollection", features: outside });
+  }, [drawnGeometry, pois, mapReady]);
+
+  // Sync selected POI highlight
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("poi-selected") as maplibregl.GeoJSONSource | undefined;
+    const layer = map.getLayer("poi-selected-highlight");
+    if (!src || !layer) return;
+
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    if (!selectedPoiId) {
+      map.setLayoutProperty("poi-selected-highlight", "visibility", "none");
+      src.setData(empty);
+      return;
+    }
+
+    const matched = pois.find((f) => {
+      const coords = (f.geometry as GeoJSON.Point).coordinates;
+      const id = f.properties.osm_id || `${coords[0]}_${coords[1]}`;
+      return id === selectedPoiId;
+    });
+    if (matched) {
+      map.setLayoutProperty("poi-selected-highlight", "visibility", "visible");
+      src.setData({ type: "FeatureCollection", features: [matched] });
+    }
+  }, [selectedPoiId, pois, mapReady]);
+
+  const handleExport = useCallback(() => {
+    if (!drawnGeometry || !analysis) return;
+    const exportData = {
+      polygon: drawnGeometry,
+      statistics: analysis.analysis,
+      matching_pois: analysis.features,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const name = analysis.analysis.reverse_geocoding?.area_name || "selection";
+    a.download = `poi-analysis-${name.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [drawnGeometry, analysis]);
+
+  const drawHint = drawMode === "draw-rect"
+    ? t("poi_analysis_draw_hint_rect")
+    : drawMode === "draw-polygon"
+      ? t("poi_analysis_draw_hint_polygon")
+      : null;
 
   if (isLoading) {
     return (
@@ -247,53 +787,194 @@ export default function InternalPoiHeatmap() {
         <Button asChild variant="ghost" size="sm">
           <Link to="/"><ArrowLeft className="h-4 w-4" /> {t("back_to_dashboard")}</Link>
         </Button>
-        <h1 className="text-sm font-semibold flex-1">POI Heatmap</h1>
-        <span className="text-[10px] font-bold mono uppercase tracking-widest px-2 py-0.5 rounded bg-secondary text-muted-foreground">Internal</span>
+        <h1 className="text-sm font-semibold flex-1">{t("internal_poi_heatmap_title")}</h1>
+        <span className="text-[10px] font-bold mono uppercase tracking-widest px-2 py-0.5 rounded bg-secondary text-muted-foreground">
+          {t("internal_poi_heatmap_badge")}
+        </span>
+        {drawMode !== "idle" && (
+          <span className="text-[11px] text-primary font-mono font-semibold">
+            ● {drawMode === "draw-rect" ? t("poi_analysis_draw_rect") : t("poi_analysis_draw_polygon")} mode
+          </span>
+        )}
       </header>
 
       <div className="flex-1 flex overflow-hidden">
         <main className="flex-1 relative">
           {isEmpty && (
             <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/80">
-              <p className="text-muted-foreground">No POIs were found in the dataset.</p>
+              <p className="text-muted-foreground">{t("internal_poi_heatmap_empty")}</p>
             </div>
           )}
           <div ref={containerRef} className="absolute inset-0" />
+          {drawHint && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-card/90 backdrop-blur border border-border rounded-lg px-4 py-2 text-xs text-muted-foreground shadow-lg">
+              {drawHint}
+            </div>
+          )}
         </main>
 
-        <aside className="w-[260px] shrink-0 border-l border-border bg-card overflow-y-auto p-3 space-y-3">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Statistics</h2>
+        <aside className="w-[300px] shrink-0 border-l border-border bg-card overflow-y-auto p-3 space-y-4">
+          {/* Drawing Tools */}
+          <Section title={t("poi_analysis_title")}>
+            <div className="flex gap-1.5 mb-1.5">
+              <Button
+                size="sm"
+                variant={drawMode === "draw-rect" ? "default" : "outline"}
+                className="h-7 text-xs gap-1"
+                onClick={() => setDrawMode(drawMode === "draw-rect" ? "idle" : "draw-rect")}
+              >
+                <Square className="h-3 w-3" /> {t("poi_analysis_draw_rect")}
+              </Button>
+              <Button
+                size="sm"
+                variant={drawMode === "draw-polygon" ? "default" : "outline"}
+                className="h-7 text-xs gap-1"
+                onClick={() => setDrawMode(drawMode === "draw-polygon" ? "idle" : "draw-polygon")}
+              >
+                <Triangle className="h-3 w-3" /> {t("poi_analysis_draw_polygon")}
+              </Button>
+            </div>
+            {drawnGeometry && (
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleZoomToSelection}>
+                  <Maximize2 className="h-3 w-3" /> {t("poi_analysis_zoom_selection")}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-destructive" onClick={handleDelete}>
+                  <Trash2 className="h-3 w-3" /> {t("poi_analysis_delete")}
+                </Button>
+              </div>
+            )}
+          </Section>
 
-          <Stat icon={<Database className="h-3.5 w-3.5" />} label="Total POIs" value={metadata?.total_pois?.toLocaleString() ?? pois.length.toLocaleString()} />
-          <Stat icon={<Layers className="h-3.5 w-3.5" />} label="Categories" value={metadata?.num_categories?.toLocaleString() ?? categorySet.size.toLocaleString()} />
-          <Stat icon={<Hash className="h-3.5 w-3.5" />} label="Dataset Source" value={metadata?.dataset_source ?? "project.csv"} />
-          <Stat icon={<ZoomIn className="h-3.5 w-3.5" />} label="Current Zoom" value={zoom.toFixed(1)} />
+          {/* Analysis Panel */}
+          {drawnGeometry && (
+            <div className="border-t border-border pt-3 space-y-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("poi_analysis_title")}
+              </h3>
 
-          {mouseCoords && (
-            <Stat
-              icon={<Crosshair className="h-3.5 w-3.5" />}
-              label="Mouse Coords"
-              value={`${mouseCoords.lat.toFixed(4)}, ${mouseCoords.lng.toFixed(4)}`}
-              mono
-            />
+              {analysisLoading && (
+                <div className="space-y-2">
+                  <Skeleton className="h-6 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-20 w-full" />
+                </div>
+              )}
+
+              {analysisError && (
+                <p className="text-xs text-destructive">Analysis request failed.</p>
+              )}
+
+              {analysis && !analysisLoading && (
+                <>
+                  {/* Summary Header */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <CompactStat
+                      label={t("poi_analysis_summary_area")}
+                      value={analysis.analysis.reverse_geocoding?.area_name ?? "Not available"}
+                    />
+                    <CompactStat
+                      label={t("poi_analysis_summary_pois")}
+                      value={analysis.analysis.total_pois?.toLocaleString() ?? "—"}
+                    />
+                    <CompactStat
+                      label={t("poi_analysis_summary_density")}
+                      value={typeof analysis.analysis.poi_density === "number" ? `${analysis.analysis.poi_density.toFixed(1)}/km²` : "—"}
+                    />
+                    <CompactStat
+                      label={t("poi_analysis_summary_dominant")}
+                      value={analysis.analysis.top_categories?.[0]?.category ?? "—"}
+                    />
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Stat icon={<MapPin className="h-3.5 w-3.5" />} label={t("poi_analysis_summary_area")} value={analysis.analysis.reverse_geocoding?.area_name ?? "Not available"} />
+                    <Stat icon={<MapPin className="h-3.5 w-3.5" />} label={t("poi_analysis_city") || "City"} value={analysis.analysis.reverse_geocoding?.city ?? "Not available"} />
+                    <Stat icon={<MapPin className="h-3.5 w-3.5" />} label={t("poi_analysis_country") || "Country"} value={analysis.analysis.reverse_geocoding?.country ?? "Not available"} />
+                    <Stat icon={<Database className="h-3.5 w-3.5" />} label={t("poi_analysis_area")} value={typeof analysis.analysis.area_km2 === "number" ? `${analysis.analysis.area_km2.toFixed(2)} km²` : "—"} />
+                    <Stat icon={<Layers className="h-3.5 w-3.5" />} label={t("poi_analysis_perimeter")} value={typeof analysis.analysis.perimeter_m === "number" ? `${(analysis.analysis.perimeter_m / 1000).toFixed(2)} km` : "—"} />
+                    <Stat icon={<Hash className="h-3.5 w-3.5" />} label={t("poi_analysis_summary_pois")} value={analysis.analysis.total_pois?.toLocaleString() ?? "—"} />
+                    <Stat icon={<Crosshair className="h-3.5 w-3.5" />} label={t("poi_analysis_center")} value={formatCentroid(analysis.analysis.centroid)} mono />
+                  </div>
+
+                  {/* Category Breakdown Chart */}
+                  {analysis.analysis.top_categories && analysis.analysis.top_categories.length > 0 && (
+                    <div className="pt-1">
+                      <h4 className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+                        {t("internal_poi_heatmap_stat_categories")}
+                      </h4>
+                      <div className="rounded border border-border bg-secondary/20 p-2">
+                        <ResponsiveContainer width="100%" height={Math.min(analysis.analysis.top_categories.length * 32, 180)}>
+                          <BarChart data={analysis.analysis.top_categories} layout="vertical" margin={{ left: 0, right: 36, top: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
+                            <XAxis type="number" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                            <YAxis type="category" dataKey="category" tick={{ fontSize: 10, fill: "hsl(var(--foreground))" }} width={80} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "hsl(var(--card))",
+                                border: "1px solid hsl(var(--border))",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                color: "hsl(var(--foreground))",
+                              }}
+                              formatter={(value: number) => [value.toLocaleString(), "Count"]}
+                            />
+                            <Bar dataKey="count" fill="#3B82F6" radius={[0, 4, 4, 0]} minPointSize={3}>
+                              <LabelList dataKey="count" position="right" style={{ fontSize: "10px", fill: "#3B82F6", fontWeight: 600 }} />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Export */}
+                  <Button size="sm" variant="outline" className="w-full h-7 text-xs gap-1" onClick={handleExport}>
+                    <Download className="h-3 w-3" /> {t("poi_analysis_export")}
+                  </Button>
+                </>
+              )}
+            </div>
           )}
 
-          <div className="pt-2 border-t border-border">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Legend</h3>
+          {/* Existing sections */}
+          <div className="border-t border-border pt-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              {t("internal_poi_heatmap_statistics")}
+            </h2>
+            <Stat icon={<Database className="h-3.5 w-3.5" />} label={t("internal_poi_heatmap_stat_total")} value={metadata?.total_pois?.toLocaleString() ?? pois.length.toLocaleString()} />
+            <Stat icon={<Layers className="h-3.5 w-3.5" />} label={t("internal_poi_heatmap_stat_categories")} value={metadata?.num_categories?.toLocaleString() ?? categorySet.size.toLocaleString()} />
+            <Stat icon={<Hash className="h-3.5 w-3.5" />} label={t("internal_poi_heatmap_stat_source")} value={metadata?.dataset_source ?? "project.csv"} />
+            <Stat icon={<ZoomIn className="h-3.5 w-3.5" />} label={t("internal_poi_heatmap_stat_zoom")} value={zoom.toFixed(1)} />
+            {mouseCoords && (
+              <Stat
+                icon={<Crosshair className="h-3.5 w-3.5" />}
+                label={t("internal_poi_heatmap_stat_coords")}
+                value={`${mouseCoords.lat.toFixed(4)}, ${mouseCoords.lng.toFixed(4)}`}
+                mono
+              />
+            )}
+          </div>
+
+          <div className="border-t border-border pt-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              {t("internal_poi_heatmap_legend")}
+            </h3>
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-xs">
                 <div className="w-4 h-4 rounded" style={{ background: "linear-gradient(to right, rgb(254,204,92), rgb(253,141,60), rgb(240,59,32))" }} />
-                <span className="text-muted-foreground">Density</span>
+                <span className="text-muted-foreground">{t("internal_poi_heatmap_density")}</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <div className="w-4 h-4 rounded-full border border-white bg-[#e63946]" />
-                <span className="text-muted-foreground">Point (zoom &ge; 15)</span>
+                <span className="text-muted-foreground">{t("internal_poi_heatmap_point")}</span>
               </div>
             </div>
           </div>
 
-          <div className="pt-2 border-t border-border space-y-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Filter</h3>
+          <div className="border-t border-border space-y-2 pt-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t("filter")}</h3>
             <div className="flex items-center justify-between rounded border border-border bg-secondary/40 px-2.5 py-2">
               <div className="flex items-center gap-1.5 text-xs">
                 <Filter className="h-3.5 w-3.5 text-muted-foreground" />
@@ -318,31 +999,49 @@ export default function InternalPoiHeatmap() {
             </div>
           </div>
 
-          <div className="pt-2 border-t border-border flex-1 flex flex-col min-h-0">
+          {/* POI Search + List */}
+          <div className="border-t border-border pt-2 flex-1 flex flex-col min-h-0">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
               <MapPin className="h-3 w-3" />
               POIs
               <span className="font-mono text-[10px] text-muted-foreground/60">({filteredPois.length})</span>
             </h3>
-            <div className="relative mb-2">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search POIs…"
-                value={poiSearch}
-                onChange={(e) => setPoiSearch(e.target.value)}
-                className="w-full h-7 rounded border border-border bg-secondary/40 pl-6 pr-2 text-xs outline-none focus:border-primary"
-              />
+            <div className="flex gap-1 mb-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder={t("poi_analysis_search_placeholder")}
+                  value={poiSearch}
+                  onChange={(e) => setPoiSearch(e.target.value)}
+                  className="w-full h-7 rounded border border-border bg-secondary/40 pl-6 pr-2 text-xs outline-none focus:border-primary"
+                />
+              </div>
+              <Select value={searchCategory} onValueChange={setSearchCategory}>
+                <SelectTrigger className="h-7 w-[90px] text-[10px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all" className="text-xs">{t("poi_analysis_all_categories")}</SelectItem>
+                  {allCategories.map((cat) => (
+                    <SelectItem key={cat} value={cat} className="text-xs">{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex-1 overflow-y-auto space-y-0.5 scrollbar-thin">
               {filteredPois.map((f, i) => {
                 const p = f.properties;
                 const coords = (f.geometry as GeoJSON.Point).coordinates;
+                const id = p.osm_id || `${coords[0]}_${coords[1]}`;
+                const isSelected = id === selectedPoiId;
                 return (
                   <button
                     key={p.osm_id || i}
-                    onClick={() => flyToPoi(coords as [number, number])}
-                    className="w-full text-left rounded px-2 py-1.5 text-xs hover:bg-secondary/60 transition-colors space-y-0.5"
+                    onClick={() => handlePoiSelect(f)}
+                    className={`w-full text-left rounded px-2 py-1.5 text-xs transition-colors space-y-0.5 ${
+                      isSelected ? "bg-primary/15 ring-1 ring-primary" : "hover:bg-secondary/60"
+                    }`}
                   >
                     <div className="font-medium truncate">{p.name}</div>
                     <div className="text-[10px] text-muted-foreground truncate">{p.category} · {p.place_type}</div>
@@ -365,6 +1064,15 @@ function Stat({ icon, label, value, mono }: { icon: React.ReactNode; label: stri
         <span>{label}</span>
       </div>
       <div className={`text-sm font-semibold ${mono ? "mono" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function CompactStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex-1 min-w-0 rounded border border-border bg-secondary/40 px-2 py-1 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground truncate">{label}</div>
+      <div className="text-[11px] font-semibold truncate">{value}</div>
     </div>
   );
 }

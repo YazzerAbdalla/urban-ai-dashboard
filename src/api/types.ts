@@ -129,6 +129,33 @@ export interface InternalPoiHeatmapResponse {
   };
 }
 
+export interface PoiAnalysisCategory {
+  category: string;
+  count: number;
+}
+
+export interface PoiAnalysisResponse {
+  type: "FeatureCollection";
+  features: GeoJSON.Feature<GeoJSON.Point, InternalPoiHeatmapPoiProperties>[];
+  analysis: {
+    total_pois: number;
+    area_m2?: number;
+    area_km2?: number;
+    perimeter_m?: number;
+    poi_density?: number;
+    centroid?: { type: string; coordinates: [number, number] };
+    category_counts?: PoiAnalysisCategory[];
+    top_categories?: PoiAnalysisCategory[];
+    reverse_geocoding?: {
+      area_name?: string;
+      city?: string;
+      country?: string;
+    } | null;
+    returned_pois?: number;
+    truncated?: boolean;
+  };
+}
+
 export interface CancelResponse {
   status: "cancelled";
   job_id: string;

@@ -9,6 +9,7 @@ import type {
   InternalPoiHeatmapResponse,
   JobId,
   LoadAreaRequest,
+  PoiAnalysisResponse,
   PoiHeatmapResponse,
   PoiItem,
 } from "./types";
@@ -62,6 +63,16 @@ export function evaluationExportUrl(jobId: string): string {
 export async function poiHeatmapApi(gridId: string): Promise<PoiHeatmapResponse> {
   const { data } = await api.get<PoiHeatmapResponse>(
     `/api/v1/grid/${gridId}/poi-heatmap`
+  );
+  return data;
+}
+
+export async function poiAnalysisApi(
+  geometry: { type: "Polygon"; coordinates: number[][][] }
+): Promise<PoiAnalysisResponse> {
+  const { data } = await api.post<PoiAnalysisResponse>(
+    "/api/v1/internal/poi-analysis",
+    { geometry, include_location: false }
   );
   return data;
 }

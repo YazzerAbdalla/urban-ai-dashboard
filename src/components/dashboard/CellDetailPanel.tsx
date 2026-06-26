@@ -1,4 +1,5 @@
-import { Pin, X, Info, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Pin, X, Info, ExternalLink, ImageOff } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useDash } from "@/store/dashboardStore";
 import { classHex } from "@/lib/colors";
@@ -6,6 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { LandUseClass } from "@/lib/api/types";
+import { buildThumbnailUrl } from "@/lib/gridUtils";
 
 export function CellDetailPanel() {
   const id = useDash((s) => s.selectedCellId);
@@ -15,6 +17,11 @@ export function CellDetailPanel() {
   const cells = useDash((s) => s.cells);
   const { t } = useI18n();
   const cell = cells.find((c) => c.id === id) ?? null;
+  const [thumbState, setThumbState] = useState<"loading" | "loaded" | "error">("loading");
+  // Reset thumbnail state whenever the selected cell changes
+  useEffect(() => {
+    setThumbState("loading");
+  }, [cell?.id]);
   if (!cell) return <div className="p-6 text-sm text-muted-foreground text-center">Click a classified cell to inspect it.</div>;
   const isPinned = pinned.includes(cell.id);
   return (
@@ -32,7 +39,7 @@ export function CellDetailPanel() {
       </div>
 
       <Button asChild size="sm" variant="secondary" className="w-full h-8 text-xs">
-        <Link to={`/grid/${cell.id}/details`}>
+        <Link to={`/classification/${useDash.getState().classifyJobId}/cell/${cell.id}`}>
           <ExternalLink className="h-3.5 w-3.5" /> {t("open_full_details")}
         </Link>
       </Button>
@@ -75,7 +82,30 @@ export function CellDetailPanel() {
 
       <div>
         <h4 className="text-xs font-semibold mb-1.5">{t("satellite")}</h4>
-        <img src={cell.satellite_thumb} alt="satellite" className="w-full rounded border border-border" />
+        {cell.satellite_thumb ? (
+          <div className="relative w-full rounded border border-border overflow-hidden bg-secondary/40 aspect-video">
+            {thumbState === "loading" && (
+              <div className="absolute inset-0 animate-pulse bg-muted" />
+            )}
+            {thumbState === "error" ? (
+              <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                <ImageOff className="h-5 w-5" />
+              </div>
+            ) : (
+              <img
+                src={buildThumbnailUrl(cell.satellite_thumb)}
+                alt="satellite"
+                className={`w-full h-full object-cover ${thumbState === "loading" ? "opacity-0" : "opacity-100"}`}
+                onLoad={() => setThumbState("loaded")}
+                onError={() => setThumbState("error")}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="w-full rounded border border-border bg-secondary/40 p-4 text-center text-xs text-muted-foreground">
+            {t("thumbnail_empty")}
+          </div>
+        )}
       </div>
 
       <div>

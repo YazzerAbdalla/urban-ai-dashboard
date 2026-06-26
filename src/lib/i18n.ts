@@ -114,6 +114,25 @@ export const dict: Dict = {
   internal_poi_heatmap_empty: { en: "No POIs were found in the dataset.", ar: "لم يتم العثور على نقاط اهتمام في مجموعة البيانات." },
   internal_poi_heatmap_error: { en: "Failed to load POI dataset.", ar: "فشل تحميل مجموعة بيانات POI." },
   internal_poi_heatmap_statistics: { en: "Statistics", ar: "الإحصائيات" },
+
+  poi_analysis_title: { en: "POI Analysis", ar: "تحليل نقاط الاهتمام" },
+  poi_analysis_draw_rect: { en: "Rectangle", ar: "مستطيل" },
+  poi_analysis_draw_polygon: { en: "Polygon", ar: "مضلع" },
+  poi_analysis_edit: { en: "Edit", ar: "تعديل" },
+  poi_analysis_delete: { en: "Delete", ar: "حذف" },
+  poi_analysis_zoom_selection: { en: "Zoom to Selection", ar: "تكبير للتحديد" },
+  poi_analysis_area: { en: "Area (km²)", ar: "المساحة (كم²)" },
+  poi_analysis_perimeter: { en: "Perimeter (km)", ar: "المحيط (كم)" },
+  poi_analysis_center: { en: "Center Coords", ar: "إحداثيات المركز" },
+  poi_analysis_export: { en: "Export JSON", ar: "تصدير JSON" },
+  poi_analysis_search_placeholder: { en: "Search by name, category, or type…", ar: "ابحث بالاسم أو الفئة أو النوع…" },
+  poi_analysis_all_categories: { en: "All Categories", ar: "جميع الفئات" },
+  poi_analysis_summary_area: { en: "Area Name", ar: "اسم المنطقة" },
+  poi_analysis_summary_pois: { en: "POIs", ar: "نقاط الاهتمام" },
+  poi_analysis_summary_density: { en: "Density", ar: "الكثافة" },
+  poi_analysis_summary_dominant: { en: "Dominant", ar: "السائد" },
+  poi_analysis_draw_hint_rect: { en: "Click & drag to draw rectangle", ar: "انقر واسحب لرسم مستطيل" },
+  poi_analysis_draw_hint_polygon: { en: "Click to place vertices, double-click to finish", ar: "انقر لوضع النقاط، انقر مرتين للإنهاء" },
 };
 
 interface I18nState {

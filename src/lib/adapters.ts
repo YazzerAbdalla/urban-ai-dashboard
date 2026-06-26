@@ -12,6 +12,7 @@
 
 import type { BackendFeatureFlat, ClassificationFeature } from "@/api/types";
 import type { CellDatum, LandUseClass } from "@/lib/api/types";
+import { extractGridIdFromThumbnail } from "@/lib/gridUtils";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,6 +126,8 @@ export function featureToCell(f: ClassificationFeature | BackendFeatureFlat): Ce
       ? [flat.centroid[1], flat.centroid[0]]
       : centroidOf(geometry);
 
+    const satThumb = flat.satellite_thumbnail_url ?? "";
+
     return {
       id: String(flat.cell_id),
       row: 0,
@@ -140,28 +143,35 @@ export function featureToCell(f: ClassificationFeature | BackendFeatureFlat): Ce
       total_road_length_m: flat.total_road_length_m ?? 0,
       graph_embedding_norm: flat.graph_embedding_norm ?? 0,
       text_embedding_norm: flat.text_embedding_norm ?? 0,
-      satellite_thumb: flat.satellite_thumbnail_url ?? "",
+      satellite_thumb: satThumb,
+      gridId: extractGridIdFromThumbnail(satThumb) ?? "",
       geometry: geometry as CellDatum["geometry"],
       centroid,
     };
   }
 
   // -------------------------------------------------------------------------
-  // Wrapped shape — fields inside feature.properties (legacy / mock)
+  // Wrapped shape — fields inside feature.properties (legacy / mock / real backend)
   // -------------------------------------------------------------------------
-  const p = (f as ClassificationFeature).properties;
+  const p = (f as ClassificationFeature).properties as Record<string, unknown>;
   const confidences = normaliseConfidences(p.confidences as unknown as Record<string, number>);
   const confidence = Math.max(...Object.values(confidences));
 
-  // Normalise class value to title-case to match LandUseClass union / classHex keys
-  const rawClass = (p.class ?? "") as string;
+  // Backend may use "dominant_class" (real) or "class" (legacy mock)
+  const rawClass = (p.class ?? p.dominant_class ?? "") as string;
   const safeClass: LandUseClass =
     (capitalise(rawClass) as LandUseClass) in confidences
       ? (capitalise(rawClass) as LandUseClass)
       : (Object.entries(confidences).sort((a, b) => b[1] - a[1])[0]?.[0] as LandUseClass) ?? "Commercial";
 
+  // Backend may use "satellite_thumbnail_url" (real) or "satellite_thumb" (legacy mock)
+  const satThumb = (p.satellite_thumbnail_url ?? p.satellite_thumb ?? "") as string;
+
+  // Backend may use "poi_top_categories" (real) or "top_poi" (legacy mock)
+  const topPoi = (p.poi_top_categories ?? p.top_poi ?? []) as string[];
+
   if (import.meta.env.DEV) {
-    console.log("[featureToCell] wrapped shape — class:", p.class, "normalised:", safeClass, "cell_id:", p.cell_id);
+    console.log("[featureToCell] wrapped shape — class:", p.class, "dominant_class:", p.dominant_class, "normalised:", safeClass, "cell_id:", p.cell_id);
   }
 
   return {
@@ -171,15 +181,16 @@ export function featureToCell(f: ClassificationFeature | BackendFeatureFlat): Ce
     class: safeClass,
     confidence,
     confidences,
-    top5_poi: p.top_poi ?? [],
-    road_density: p.road_density ?? 0,
-    node_count: p.node_count ?? 0,
-    degree_centrality: p.degree_centrality ?? 0,
-    clustering_coeff: p.clustering_coeff ?? 0,
-    total_road_length_m: p.total_road_length_m ?? 0,
-    graph_embedding_norm: p.graph_embedding_norm ?? 0,
-    text_embedding_norm: p.text_embedding_norm ?? 0,
-    satellite_thumb: p.satellite_thumb ?? "",
+    top5_poi: topPoi,
+    road_density: (p.road_density ?? 0) as number,
+    node_count: (p.node_count ?? 0) as number,
+    degree_centrality: (p.degree_centrality ?? 0) as number,
+    clustering_coeff: (p.clustering_coeff ?? 0) as number,
+    total_road_length_m: (p.total_road_length_m ?? 0) as number,
+    graph_embedding_norm: (p.graph_embedding_norm ?? 0) as number,
+    text_embedding_norm: (p.text_embedding_norm ?? 0) as number,
+    satellite_thumb: satThumb,
+    gridId: extractGridIdFromThumbnail(satThumb) ?? "",
     geometry: geometry as CellDatum["geometry"],
     centroid: centroidOf(geometry),
   };

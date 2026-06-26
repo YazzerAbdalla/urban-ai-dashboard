@@ -1,4 +1,6 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Switch } from "@/components/ui/switch";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { MapView } from "@/components/dashboard/MapView";
@@ -12,16 +14,22 @@ import { useClassify } from "@/hooks/api/useClassify";
 import { useCancelJob } from "@/hooks/api/useCancelJob";
 import { useJobProgress } from "@/hooks/api/useJobProgress";
 import { useClassificationResult } from "@/hooks/api/useClassificationResult";
+import { useClassification } from "@/hooks/api/useClassification";
 import { isSuccess, isTerminal, type LoadingStep } from "@/api/types";
 import { featureToCell } from "@/lib/adapters";
 import { useUrlLayers } from "@/hooks/useUrlLayers";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import type { Modality } from "@/lib/api/types";
 import { toast } from "@/hooks/use-toast";
+import { useI18n } from "@/lib/i18n";
 import { getBboxFromGeometry, createSmallDefaultArea } from "@/lib/geoUtils";
 
 const Index = () => {
   useUrlLayers();
+
+  const { jobId: routeJobId } = useParams();
+  const navigate = useNavigate();
+  const reviewMode = !!routeJobId;
 
   const {
     setLoaded, setLoadingStep, setClassifying, setClassifyProgress,
@@ -31,18 +39,32 @@ const Index = () => {
     searchLocation,
   } = useDash();
 
+  const storeCells = useDash((s) => s.cells);
+  const storeGridId = useDash((s) => s.gridId);
+  const storeClassifyJobId = useDash((s) => s.classifyJobId);
+
   const loadAreaM = useLoadArea();
   const classifyM = useClassify();
   const cancelM = useCancelJob();
   const loadProgress = useJobProgress(loadJobId);
   const classifyProgress = useJobProgress(classifyJobId);
-  const resultQ = useClassificationResult(classifyJobId, isSuccess(classifyProgress.status));
+  const resultQ = useClassificationResult(
+    reviewMode ? null : classifyJobId,
+    !reviewMode && isSuccess(classifyProgress.status)
+  );
+  const reviewQ = useClassification(reviewMode ? routeJobId : null);
+
+  // Resolve jobId / gridId / cells for MapView: prefer route params / API data, fall back to store
+  const activeJobId = routeJobId || storeClassifyJobId;
+  const activeGridId = reviewQ.data?.gridId ?? storeGridId;
+  const activeCells = reviewMode ? (reviewQ.data?.cells ?? storeCells) : storeCells;
 
   /**
    * Triggers loading of urban data for the selected area of interest (AOI).
    * Implements validation and automatic grid size fallback.
    */
   const handleLoadArea = useCallback(() => {
+    if (reviewMode) return;
     if (useDash.getState().loaded || loadAreaM.isPending) return;
 
     let areaToAnalyze = null;
@@ -115,6 +137,7 @@ const Index = () => {
       }
     );
   }, [
+    reviewMode,
     drawnGeometry,
     searchLocation,
     gridSize,
@@ -126,6 +149,7 @@ const Index = () => {
   ]);
 
   const handleClassify = useCallback(() => {
+    if (reviewMode) return;
     const state = useDash.getState();
     if (!state.loaded || state.classifying || !state.gridId) return;
     const mods = (Object.keys(state.modalities) as Modality[]).filter((k) => state.modalities[k]);
@@ -147,9 +171,10 @@ const Index = () => {
         onError: () => { setClassifying(false); setLoadingStep(null); },
       }
     );
-  }, [classifyM, fusion, modelType, resetCells, setClassifying, setClassifyJobId, setLoadingStep]);
+  }, [reviewMode, classifyM, fusion, modelType, resetCells, setClassifying, setClassifyJobId, setLoadingStep]);
 
   const handleCancel = useCallback(() => {
+    if (reviewMode) return;
     const jid = classifyJobId || loadJobId;
     if (!jid) return;
     cancelM.mutate(jid, {
@@ -160,7 +185,7 @@ const Index = () => {
         else setLoadJobId(null);
       },
     });
-  }, [cancelM, classifyJobId, loadJobId, setClassifying, setClassifyJobId, setLoadJobId, setLoadingStep]);
+  }, [reviewMode, cancelM, classifyJobId, loadJobId, setClassifying, setClassifyJobId, setLoadJobId, setLoadingStep]);
 
   // React to load-area job progress
   useEffect(() => {
@@ -189,9 +214,9 @@ const Index = () => {
     }
   }, [classifyJobId, classifyProgress.status, classifyProgress.step, classifyProgress.progress, setClassifying, setClassifyProgress, setLoadingStep]);
 
-  // Populate cells when classification result arrives
+  // Populate cells when classification result arrives (workspace mode)
   useEffect(() => {
-    if (!resultQ.data) return;
+    if (!resultQ.data || reviewMode) return;
     if (import.meta.env.DEV) {
       console.log("[Index] classification result received — feature count:", resultQ.data.features?.length);
       resultQ.data.features?.forEach((f: Record<string, unknown>) => {
@@ -205,7 +230,23 @@ const Index = () => {
     }
     setCells(mapped);
     setClassifying(false);
-  }, [resultQ.data, setCells, setClassifying]);
+    // Navigate to route-driven view after classification completes
+    const state = useDash.getState();
+    if (state.classifyJobId) {
+      navigate(`/classification/${state.classifyJobId}`, { replace: true });
+    }
+  }, [resultQ.data, reviewMode, setCells, setClassifying, navigate]);
+
+  // Populate cells in review mode when fetched via useClassification
+  useEffect(() => {
+    if (!reviewQ.data || !reviewMode) return;
+    setCells(reviewQ.data.cells);
+    setLoaded(true);
+    setClassifying(false);
+    setLoadingStep(null);
+    setClassifyJobId(routeJobId ?? null);
+    setGridId(reviewQ.data.gridId ?? null);
+  }, [reviewQ.data, reviewMode, routeJobId, setCells, setLoaded, setClassifying, setLoadingStep, setClassifyJobId, setGridId]);
 
   useKeyboardShortcuts({
     onDraw: handleLoadArea,
@@ -218,9 +259,13 @@ const Index = () => {
     <div className="h-screen flex flex-col bg-background text-foreground">
       <TopBar />
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar onLoadArea={handleLoadArea} onClassify={handleClassify} onCancel={handleCancel} />
+        {reviewMode ? (
+          <ReviewSidebar />
+        ) : (
+          <Sidebar onLoadArea={handleLoadArea} onClassify={handleClassify} onCancel={handleCancel} />
+        )}
         <main className="flex-1 relative">
-          <MapView />
+          <MapView jobId={activeJobId} gridId={activeGridId} cells={activeCells} />
           <LoadingOverlay />
           <MapLegend />
         </main>
@@ -228,6 +273,32 @@ const Index = () => {
       </div>
       <StatusBar />
     </div>
+  );
+}
+
+function ReviewSidebar() {
+  const { t } = useI18n();
+  const layers = useDash((s) => s.layers);
+  const setLayer = useDash((s) => s.setLayer);
+  const layerKeyMap: Record<string, string> = {
+    classification: "layer_classification",
+    poi: "layer_poi",
+    roads: "layer_roads",
+    graph: "layer_graph",
+    satellite: "layer_satellite",
+  };
+  return (
+    <aside className="w-[320px] shrink-0 border-r border-border bg-card overflow-y-auto">
+      <div className="p-4 space-y-5">
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{t("layers")}</h3>
+        {(["classification", "poi", "roads", "graph", "satellite"] as const).map((k) => (
+          <label key={k} className="flex items-center justify-between text-sm py-0.5 cursor-pointer">
+            <span>{t(layerKeyMap[k] as keyof typeof import("@/lib/i18n").dict)}</span>
+            <Switch checked={layers[k]} onCheckedChange={(v) => setLayer(k, v)} />
+          </label>
+        ))}
+      </div>
+    </aside>
   );
 };
 

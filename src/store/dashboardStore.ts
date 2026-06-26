@@ -70,6 +70,9 @@ interface DashState {
   searchLocation: { lat: number; lng: number; label: string } | null;
   /** Sets the selected search location. */
   setSearchLocation: (loc: { lat: number; lng: number; label: string } | null) => void;
+
+  poiHeatmapEmpty: boolean;
+  setPoiHeatmapEmpty: (v: boolean) => void;
 }
 
 const STEP2_BBOX = { north: 30.10, south: 29.90, east: 31.30, west: 31.10 };
@@ -146,4 +149,7 @@ export const useDash = create<DashState>((set) => ({
 
   searchLocation: null,
   setSearchLocation: (searchLocation) => set({ searchLocation }),
+
+  poiHeatmapEmpty: false,
+  setPoiHeatmapEmpty: (poiHeatmapEmpty) => set({ poiHeatmapEmpty }),
 }));
