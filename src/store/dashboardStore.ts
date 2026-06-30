@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { CellDatum, FusionMethod, LoadingStep, Modality, ModelType } from "@/lib/api/types";
-import type { JobStatus } from "@/api/types";
+import type { JobStatus, QueryResponse } from "@/api/types";
 
 export type LayerKey = "classification" | "poi" | "roads" | "graph" | "satellite";
 
@@ -73,6 +73,19 @@ interface DashState {
 
   poiHeatmapEmpty: boolean;
   setPoiHeatmapEmpty: (v: boolean) => void;
+
+  queryResults: QueryResponse | null;
+  setQueryResults: (r: QueryResponse | null) => void;
+  queryHistory: string[];
+  addQueryHistory: (q: string) => void;
+  isQuerying: boolean;
+  setIsQuerying: (v: boolean) => void;
+  queryError: string | null;
+  setQueryError: (e: string | null) => void;
+  matchedCellIds: string[];
+  setMatchedCellIds: (ids: string[]) => void;
+  aiQueryOpen: boolean;
+  setAiQueryOpen: (v: boolean) => void;
 }
 
 const STEP2_BBOX = { north: 30.10, south: 29.90, east: 31.30, west: 31.10 };
@@ -152,4 +165,21 @@ export const useDash = create<DashState>((set) => ({
 
   poiHeatmapEmpty: false,
   setPoiHeatmapEmpty: (poiHeatmapEmpty) => set({ poiHeatmapEmpty }),
+
+  queryResults: null,
+  setQueryResults: (queryResults) => set({ queryResults }),
+  queryHistory: [],
+  addQueryHistory: (q) =>
+    set((s) => {
+      const filtered = s.queryHistory.filter((h) => h !== q);
+      return { queryHistory: [q, ...filtered].slice(0, 5) };
+    }),
+  isQuerying: false,
+  setIsQuerying: (isQuerying) => set({ isQuerying }),
+  queryError: null,
+  setQueryError: (queryError) => set({ queryError }),
+  matchedCellIds: [],
+  setMatchedCellIds: (matchedCellIds) => set({ matchedCellIds }),
+  aiQueryOpen: false,
+  setAiQueryOpen: (aiQueryOpen) => set({ aiQueryOpen }),
 }));

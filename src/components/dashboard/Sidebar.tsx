@@ -11,6 +11,7 @@ import { useI18n } from "@/lib/i18n";
 import { estimateCells } from "@/lib/api/mockClient";
 import { cn } from "@/lib/utils";
 import type { FusionMethod, Modality } from "@/lib/api/types";
+import { AiQueryPanel } from "./AiQueryPanel";
 import { getBboxFromGeometry, createSmallDefaultArea } from "@/lib/geoUtils";
 
 /**
@@ -266,6 +267,7 @@ export function Sidebar({ onLoadArea, onClassify, onCancel }: Props) {
           )}
           <LayerRow label={t("layer_satellite")} value={layers.satellite} onChange={(v) => setLayer("satellite", v)} />
         </Section>
+        <AiQueryPanel />
       </div>
     </aside>
   );

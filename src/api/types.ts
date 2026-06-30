@@ -181,6 +181,27 @@ export interface CancelResponse {
   job_id: string;
 }
 
+export interface QueryRequest {
+  question: string;
+  grid_id: string;
+}
+
+export interface QueryMatchedCell {
+  cell_id: string;
+  dominant_class: string;
+  confidence: number;
+  centroid: [number, number];
+  road_density: number;
+  poi_categories: string[];
+}
+
+export interface QueryResponse {
+  answer: string;
+  query_type: string;
+  confidence: number;
+  matched_cells: QueryMatchedCell[];
+}
+
 export type ExportFormat = "geojson" | "csv" | "shapefile";
 
 export const TERMINAL_STATUSES: JobStatus[] = ["done", "completed", "failed", "cancelled"];

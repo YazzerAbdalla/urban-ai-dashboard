@@ -61,6 +61,8 @@ export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapView
   const setDrawMode = useDash((s) => s.setDrawMode);
   const searchLocation = useDash((s) => s.searchLocation);
   const storeGridId = useDash((s) => s.gridId);
+  const matchedCellIds = useDash((s) => s.matchedCellIds);
+  const queryResults = useDash((s) => s.queryResults);
 
   // Use passed props when available, fall back to store values
   const effectiveCells = propCells ?? storeCells;
@@ -96,6 +98,13 @@ export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapView
     }
     return { type: "FeatureCollection" as const, features };
   }, [effectiveCells]);
+
+  // FeatureCollection for query-matched cells (subset of cellsFC)
+  const matchedFC = useMemo(() => {
+    const ids = new Set(matchedCellIds);
+    const features = cellsFC.features.filter((f) => ids.has(f.properties.id as string));
+    return { type: "FeatureCollection" as const, features };
+  }, [cellsFC, matchedCellIds]);
 
   // Split backend graph-topology FeatureCollection into nodes + edges
   const graphSplit = useMemo(() => {
@@ -302,6 +311,56 @@ export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapView
         type: "line",
         source: "drawn",
         paint: { "line-color": "#22d3ee", "line-width": 2 },
+      });
+
+      // Query-matched cells highlight
+      map.addSource("matched-cells", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "matched-cells-highlight",
+        type: "line",
+        source: "matched-cells",
+        paint: {
+          "line-color": "#22d3ee",
+          "line-width": 3,
+          "line-opacity": 0.9,
+        },
+      });
+      map.addLayer({
+        id: "matched-cells-glow",
+        type: "line",
+        source: "matched-cells",
+        paint: {
+          "line-color": "#22d3ee",
+          "line-width": 7,
+          "line-opacity": 0.25,
+        },
+      });
+
+      // Click handler for matched cells popup
+      const popup = new maplibregl.Popup({ offset: 14, closeButton: true, maxWidth: "320px" });
+      map.on("click", "cells-fill", (e) => {
+        if (useDash.getState().drawMode) return;
+        const f = e.features?.[0];
+        if (!f) return;
+        const cellId = String(f.properties?.id ?? "");
+        if (!useDash.getState().matchedCellIds.includes(cellId)) return;
+        const matched = useDash.getState().queryResults?.matched_cells.find((c) => c.cell_id === cellId);
+        if (!matched) return;
+        const html = `
+          <div style="font-size:12px;line-height:1.6;color:#000;max-width:300px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:4px">Cell ${matched.cell_id}</div>
+            <table style="width:100%;border-collapse:collapse">
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Dominant Class</td><td style="font-family:monospace">${matched.dominant_class}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Confidence</td><td style="font-family:monospace">${(matched.confidence * 100).toFixed(0)}%</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Road Density</td><td style="font-family:monospace">${matched.road_density.toFixed(2)} km/km²</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Top Categories</td><td style="font-family:monospace">${matched.poi_categories.slice(0, 3).join(", ") || "—"}</td></tr>
+              <tr><td style="opacity:.6;padding-right:8px;white-space:nowrap">Centroid</td><td style="font-family:monospace">${matched.centroid[1].toFixed(5)}, ${matched.centroid[0].toFixed(5)}</td></tr>
+            </table>
+          </div>`;
+        popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
       });
 
       setMapReady(true);
@@ -515,6 +574,32 @@ export function MapView({ jobId, gridId: propGridId, cells: propCells }: MapView
       map.setFeatureState({ source: "cells", id: f.id as string }, { selected: f.id === selectedCellId });
     });
   }, [selectedCellId, cellsFC]);
+
+  // Update matched-cells source data
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("matched-cells") as maplibregl.GeoJSONSource | undefined;
+    if (src) src.setData(matchedFC as any);
+    const ids = new Set(matchedCellIds);
+    const matched = cellsFC.features.filter((f) => ids.has(f.properties.id as string));
+    if (matched.length > 1) {
+      const bounds = new maplibregl.LngLatBounds();
+      matched.forEach((f) => {
+        const coords = (f.geometry as GeoJSON.Polygon).coordinates[0];
+        coords.forEach((c) => bounds.extend(c as [number, number]));
+      });
+      map.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 800 });
+    } else if (matched.length === 1) {
+      const geom = matched[0].geometry as GeoJSON.Polygon;
+      const coords = geom.coordinates[0];
+      let x = 0, y = 0;
+      for (const [lng, lat] of coords) { x += lng; y += lat; }
+      const cx = x / coords.length;
+      const cy = y / coords.length;
+      map.flyTo({ center: [cx, cy], zoom: 14, duration: 800 });
+    }
+  }, [matchedFC, matchedCellIds, cellsFC]);
 
   return <div ref={containerRef} className="absolute inset-0" aria-label="Map" />;
 }

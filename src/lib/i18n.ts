@@ -212,6 +212,18 @@ dict.poi_manager_delete_poi = { en: "Remove", ar: "إزالة" };
 dict.poi_manager_no_valid_pois = { en: "No valid POIs available for preview.", ar: "لا توجد نقاط اهتمام صالحة للمعاينة." };
 dict.nav_poi_manager = { en: "POI Manager", ar: "مدير نقاط الاهتمام" };
 dict.no_results = { en: "No results", ar: "لا توجد نتائج" };
+dict.ai_query = { en: "AI Query Assistant", ar: "مساعد الاستعلام AI" };
+dict.ai_query_placeholder = { en: "e.g. Show commercial areas", ar: "مثال: عرض المناطق التجارية" };
+dict.ai_query_search = { en: "Search", ar: "بحث" };
+dict.ai_query_searching = { en: "Searching...", ar: "جارٍ البحث..." };
+dict.ai_query_found = { en: "Found {n} matching {n, plural, one {cell} other {cells}}", ar: "تم العثور على {n} خلية {n, plural, one {} other {}} مطابقة" };
+dict.ai_query_avg_confidence = { en: "Average Confidence", ar: "متوسط الثقة" };
+dict.ai_query_top_categories = { en: "Top Categories", ar: "أهم الفئات" };
+dict.ai_query_matched_cells = { en: "Matched Cells", ar: "الخلايا المطابقة" };
+dict.ai_query_no_results = { en: "No matching locations were found.", ar: "لم يتم العثور على مواقع مطابقة." };
+dict.ai_query_error = { en: "Failed to query. Please try again.", ar: "فشل الاستعلام. يرجى المحاولة مرة أخرى." };
+dict.ai_query_history = { en: "Recent Searches", ar: "عمليات البحث الأخيرة" };
+dict.ai_query_cell = { en: "Cell", ar: "خلية" };
 
 interface I18nState {
   lang: Lang;

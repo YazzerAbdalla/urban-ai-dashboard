@@ -21,6 +21,7 @@ import type {
   PoiQualityReviewRequest,
   PoiQualityReviewResponse,
 } from "./poiDataManagerTypes";
+import type { QueryRequest, QueryResponse } from "./types";
 
 export async function loadAreaApi(body: LoadAreaRequest): Promise<JobId> {
   const { data } = await api.post<JobId>("/api/v1/load-area", body);
@@ -136,5 +137,10 @@ export async function evaluateApi(jobId: string, file: File): Promise<EvaluateRe
   const { data } = await api.post<EvaluateResponse>("/api/v1/evaluate", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
+  return data;
+}
+
+export async function queryApi(body: QueryRequest): Promise<QueryResponse> {
+  const { data } = await api.post<QueryResponse>("/api/v1/query", body);
   return data;
 }
