@@ -7,6 +7,7 @@ import { MapView } from "@/components/dashboard/MapView";
 import { RightPanel } from "@/components/dashboard/RightPanel";
 import { StatusBar } from "@/components/dashboard/StatusBar";
 import { LoadingOverlay } from "@/components/dashboard/LoadingOverlay";
+import { AiQueryPanel } from "@/components/dashboard/AiQueryPanel";
 import { useDash } from "@/store/dashboardStore";
 import { cairoBbox, estimateCells } from "@/lib/api/mockClient";
 import { useLoadArea } from "@/hooks/api/useLoadArea";
@@ -280,27 +281,30 @@ function ReviewSidebar() {
   const { t } = useI18n();
   const layers = useDash((s) => s.layers);
   const setLayer = useDash((s) => s.setLayer);
-  const layerKeyMap: Record<string, string> = {
-    classification: "layer_classification",
-    poi: "layer_poi",
-    roads: "layer_roads",
-    graph: "layer_graph",
-    satellite: "layer_satellite",
-  };
+  const poiHeatmapEmpty = useDash((s) => s.poiHeatmapEmpty);
   return (
     <aside className="w-[320px] shrink-0 border-r border-border bg-card overflow-y-auto">
       <div className="p-4 space-y-5">
-        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{t("layers")}</h3>
-        {(["classification", "poi", "roads", "graph", "satellite"] as const).map((k) => (
-          <label key={k} className="flex items-center justify-between text-sm py-0.5 cursor-pointer">
-            <span>{t(layerKeyMap[k] as keyof typeof import("@/lib/i18n").dict)}</span>
-            <Switch checked={layers[k]} onCheckedChange={(v) => setLayer(k, v)} />
-          </label>
-        ))}
+        <section className="space-y-2">
+          <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{t("layers")}</h3>
+          <LayerRow label={t("layer_classification")} value={layers.classification} onChange={(v) => setLayer("classification", v)} />
+          <LayerRow label={t("layer_poi")} value={layers.poi} onChange={(v) => setLayer("poi", v)} />
+          {poiHeatmapEmpty && (
+            <p className="text-[11px] text-muted-foreground pl-6">No POIs available for the selected area.</p>
+          )}
+          <LayerRow label={t("layer_roads")} value={layers.roads} onChange={(v) => setLayer("roads", v)} />
+          <LayerRow label={t("layer_graph")} value={layers.graph} onChange={(v) => setLayer("graph", v)} />
+          <LayerRow label={t("layer_satellite")} value={layers.satellite} onChange={(v) => setLayer("satellite", v)} />
+        </section>
+        <AiQueryPanel />
       </div>
     </aside>
   );
 };
+
+function LayerRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (<div className="flex items-center justify-between text-sm py-0.5"><span>{label}</span><Switch checked={value} onCheckedChange={onChange} /></div>);
+}
 
 function MapLegend() {
   return (
