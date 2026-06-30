@@ -115,6 +115,12 @@ export const dict: Dict = {
   internal_poi_heatmap_error: { en: "Failed to load POI dataset.", ar: "فشل تحميل مجموعة بيانات POI." },
   internal_poi_heatmap_statistics: { en: "Statistics", ar: "الإحصائيات" },
 
+  spatial_accuracy_tooltip: { en: "Measures how spatially consistent neighboring predictions are. Computed using KDTree neighborhood analysis.", ar: "يقيس مدى اتساق التوقعات مكانيًا. يتم حسابه باستخدام تحليل الجوار KDTree." },
+  spatial_accuracy_detail: { en: "Higher values indicate that neighboring urban cells have consistent predictions.", ar: "تشير القيم الأعلى إلى أن الخلايا الحضرية المجاورة لها توقعات متسقة." },
+  overall_higher: { en: "Overall Accuracy is higher — model performs better on label match than spatial consistency.", ar: "الدقة الإجمالية أعلى — أداء النموذج أفضل في مطابقة التسميات من الاتساق المكاني." },
+  spatial_higher: { en: "Spatial Accuracy is higher — predictions are more spatially coherent than label-accurate.", ar: "الدقة المكانية أعلى — التوقعات أكثر اتساقًا مكانيًا من دقة التسميات." },
+  accuracy_equal: { en: "Both metrics are equal — label accuracy and spatial consistency are balanced.", ar: "كلا المقياسين متساويان — دقة التسمية والاتساق المكاني متوازنان." },
+
   poi_analysis_title: { en: "POI Analysis", ar: "تحليل نقاط الاهتمام" },
   poi_analysis_draw_rect: { en: "Rectangle", ar: "مستطيل" },
   poi_analysis_draw_polygon: { en: "Polygon", ar: "مضلع" },

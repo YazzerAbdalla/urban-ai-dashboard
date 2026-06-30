@@ -7,6 +7,8 @@ import { evaluationExportUrl, exportJobUrl } from "@/api/endpoints";
 import { classHex } from "@/lib/colors";
 import { useI18n } from "@/lib/i18n";
 import type { EvaluateResponse } from "@/api/types";
+import { KpiCard } from "./KpiCard";
+import { AccuracyComparison } from "./AccuracyComparison";
 
 export function EvaluationPanel() {
   const cells = useDash((s) => s.cells);
@@ -80,11 +82,33 @@ export function EvaluationPanel() {
 
       {metrics && <>
         <section className="grid grid-cols-2 gap-2">
-          <Stat label={t("accuracy")} value={(metrics.overall_accuracy * 100).toFixed(1) + "%"} />
-          <Stat label={t("spatial_accuracy")} value={(metrics.spatial_accuracy * 100).toFixed(1) + "%"} />
-          <Stat label={t("macro_f1")} value={metrics.macro_f1.toFixed(3)} />
-          <Stat label={t("weighted_f1")} value={metrics.weighted_f1.toFixed(3)} />
+          <KpiCard
+            label={t("accuracy")}
+            value={metrics.overall_accuracy}
+            format="percent"
+          />
+          <KpiCard
+            label={t("macro_f1")}
+            value={metrics.macro_f1}
+            format="decimal"
+          />
+          <KpiCard
+            label={t("weighted_f1")}
+            value={metrics.weighted_f1}
+            format="decimal"
+          />
+          <KpiCard
+            label={t("spatial_accuracy")}
+            value={metrics.spatial_accuracy}
+            format="percent"
+            tooltip={t("spatial_accuracy_tooltip")}
+            detail={t("spatial_accuracy_detail")}
+          />
         </section>
+        <AccuracyComparison
+          overallAccuracy={metrics.overall_accuracy}
+          spatialAccuracy={metrics.spatial_accuracy}
+        />
         <section>
           <h4 className="text-xs font-semibold mb-2">{t("per_class_f1")}</h4>
           <div className="space-y-1 text-xs">
@@ -112,12 +136,6 @@ export function EvaluationPanel() {
       </>}
     </div>
   );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (<div className="rounded border border-border bg-secondary/40 p-2">
-    <div className="text-[10px] uppercase tracking-wider mono text-muted-foreground">{label}</div>
-    <div className="mono text-base font-semibold">{value}</div></div>);
 }
 
 function ConfusionMatrix({ matrix, labels }: { matrix: number[][]; labels: string[] }) {
